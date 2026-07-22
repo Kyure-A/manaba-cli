@@ -13,6 +13,7 @@
  (depends
   (ocaml (>= 5.1))
   cmdliner
+  conduit-lwt-unix
   cohttp-lwt-unix
   lambdasoup
   lwt

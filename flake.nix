@@ -39,6 +39,7 @@
 
           propagatedBuildInputs = with ocamlPackages; [
             cmdliner
+            conduit-lwt-unix
             cohttp-lwt-unix
             lambdasoup
             lwt

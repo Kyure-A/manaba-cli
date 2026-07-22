@@ -2,4 +2,12 @@
  (name manaba_cli_lib)
  (public_name manaba_cli.lib)
  (wrapped false)
- (libraries cohttp-lwt-unix lambdasoup lwt.unix uri yojson str unix))
+ (libraries
+  conduit-lwt-unix
+  cohttp-lwt-unix
+  lambdasoup
+  lwt.unix
+  uri
+  yojson
+  str
+  unix))

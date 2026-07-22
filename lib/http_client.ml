@@ -7,12 +7,22 @@ type response = {
   body : string;
 }
 
-type t = { jar : Cookie_jar.t; user_agent : string }
+type t = {
+  jar : Cookie_jar.t;
+  user_agent : string;
+  context : Cohttp_lwt_unix.Client.ctx;
+}
+
+let resolver () =
+  Resolver_lwt.init ~service:Resolver_lwt_unix.static_service
+    ~rewrites:[ ("", Resolver_lwt_unix.system_resolver) ]
+    ()
 
 let create ~session_path =
   {
     jar = Cookie_jar.load session_path;
     user_agent = "manaba-cli/0.1 (+https://github.com/Kyure-A/manaba-cli)";
+    context = Cohttp_lwt_unix.Client.custom_ctx ~resolver:(resolver ()) ();
   }
 
 let add_default_headers client uri headers =
@@ -36,7 +46,7 @@ let rec request ?(headers = Cohttp.Header.init ()) ?body ?(redirects = 12)
   let request_body = body in
   let headers = add_default_headers client uri headers in
   let body = Option.map Cohttp_lwt.Body.of_string body in
-  Cohttp_lwt_unix.Client.call ?body ~headers method_ uri
+  Cohttp_lwt_unix.Client.call ~ctx:client.context ?body ~headers method_ uri
   >>= fun (response, body) ->
   Cohttp_lwt.Body.to_string body >>= fun body_string ->
   let status = Cohttp.Response.status response in
