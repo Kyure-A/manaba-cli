@@ -29,7 +29,9 @@ let credential_fields form ~username ~password =
   List.fold_left
     (fun fields control ->
       match control.Types.name with
-      | Some name when control.input_type = "password" ->
+      | Some name
+        when match control.input_type with Types.Password -> true | _ -> false
+        ->
           merge_field name password fields
       | Some name when username_control control ->
           merge_field name username fields
@@ -39,8 +41,10 @@ let credential_fields form ~username ~password =
 
 let post_form client response form fields =
   let destination = resolve_action response form.Types.action in
-  if form.method_ = "get" then Http_client.get_form client destination fields
-  else Http_client.post_form client destination fields
+  match form.method_ with
+  | Types.Get -> Http_client.get_form client destination fields
+  | Types.Post | Types.Other_method _ ->
+      Http_client.post_form client destination fields
 
 let login client ~base_uri ~username ~password =
   let start = Uri.resolve "" base_uri (Uri.of_string "./") in
@@ -49,7 +53,7 @@ let login client ~base_uri ~username ~password =
       Lwt.return
         (Error (Unsupported_flow "認証画面の遷移回数が上限を超えました。サイトの認証方式が変更された可能性があります。"))
     else if Html.is_logged_in response.Http_client.body then (
-      Cookie_jar.save client.Http_client.jar;
+      Http_client.save_session client;
       Lwt.return (Ok response))
     else
       let forms = Html.forms response.body in
@@ -96,4 +100,4 @@ let status client ~base_uri =
     (fun exception_ ->
       Lwt.return (Error (`Network (Printexc.to_string exception_))))
 
-let logout client = Cookie_jar.clear client.Http_client.jar
+let logout = Http_client.clear_session

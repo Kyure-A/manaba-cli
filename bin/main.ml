@@ -69,11 +69,12 @@ let login username password_stdin password_clipboard client =
     | Ok password -> (
         match
           Lwt_main.run
-            (Auth.login client.Manaba.http ~base_uri:client.base_uri ~username
-               ~password)
+            (Auth.login (Manaba.http client) ~base_uri:(Manaba.base_uri client)
+               ~username ~password)
         with
         | Ok _ ->
-            Printf.printf "ログインしました。セッションは %s に保存しました。\n" client.session_path;
+            Printf.printf "ログインしました。セッションは %s に保存しました。\n"
+              (Manaba.session_path client);
             `Ok ()
         | Error problem -> `Error (false, Auth.error_to_string problem))
 
@@ -100,7 +101,8 @@ let login_cmd =
 
 let auth_status client =
   match
-    Lwt_main.run (Auth.status client.Manaba.http ~base_uri:client.base_uri)
+    Lwt_main.run
+      (Auth.status (Manaba.http client) ~base_uri:(Manaba.base_uri client))
   with
   | Ok _ ->
       print_endline "logged in";
@@ -116,7 +118,7 @@ let status_cmd =
     Term.(ret (const auth_status $ client))
 
 let logout client =
-  Auth.logout client.Manaba.http;
+  Auth.logout (Manaba.http client);
   print_endline "ローカルのセッションを削除しました。";
   `Ok ()
 
@@ -347,7 +349,7 @@ let yes_flag = Arg.(value & flag & info [ "yes"; "y" ] ~doc:"確認なしで実�
 
 let flow target plan_path yes client =
   match Flow_plan.load plan_path with
-  | Error message -> `Error (false, message)
+  | Error problem -> `Error (false, Flow_plan.error_to_string problem)
   | Ok steps ->
       if
         not

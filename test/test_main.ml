@@ -100,8 +100,12 @@ let test_visible_text () =
 let test_report_form () =
   match Html.forms report_form_html with
   | [ form ] ->
-      Alcotest.(check string) "method" "post" form.Types.method_;
-      Alcotest.(check string) "enctype" "multipart/form-data" form.enctype;
+      Alcotest.(check string)
+        "method" "post"
+        (Types.form_method_to_string form.Types.method_);
+      Alcotest.(check string)
+        "enctype" "multipart/form-data"
+        (Types.form_enctype_to_string form.enctype);
       (match Html.file_controls form with
       | [ control ] ->
           Alcotest.(check (option string))
@@ -162,6 +166,98 @@ let test_report_form () =
            delete_fields)
   | forms -> Alcotest.failf "expected one form, got %d" (List.length forms)
 
+let test_unknown_form_domains_preserved () =
+  let html =
+    {|
+    <form action="custom" method="dialog" enctype="text/plain">
+      <input type="color" name="shade" value="blue">
+    </form>
+    |}
+  in
+  match Html.forms html with
+  | [ form ] ->
+      Alcotest.(check string)
+        "unknown method" "dialog"
+        (Types.form_method_to_string form.Types.method_);
+      Alcotest.(check string)
+        "unknown enctype" "text/plain"
+        (Types.form_enctype_to_string form.enctype);
+      let actual = Types.public_form_to_yojson form in
+      let expected =
+        Yojson.Safe.from_string
+          {|{
+            "action": "custom",
+            "method": "dialog",
+            "enctype": "text/plain",
+            "controls": [{
+              "tag": "input",
+              "type": "color",
+              "name": "shade",
+              "multiple": false,
+              "options": [],
+              "value": "blue"
+            }]
+          }|}
+      in
+      Alcotest.(check string)
+        "public JSON contract"
+        (Yojson.Safe.to_string expected)
+        (Yojson.Safe.to_string actual)
+  | forms -> Alcotest.failf "expected one form, got %d" (List.length forms)
+
+let check_round_trips label of_string to_string values =
+  List.iter
+    (fun value ->
+      Alcotest.(check string)
+        (label ^ ": " ^ value)
+        value
+        (value |> of_string |> to_string))
+    values
+
+let test_form_domain_round_trips () =
+  check_round_trips "method" Types.form_method_of_string
+    Types.form_method_to_string
+    [ "get"; "post"; "dialog" ];
+  check_round_trips "enctype" Types.form_enctype_of_string
+    Types.form_enctype_to_string
+    [ "application/x-www-form-urlencoded"; "multipart/form-data"; "text/plain" ];
+  check_round_trips "tag" Types.control_tag_of_string
+    Types.control_tag_to_string
+    [ "input"; "textarea"; "select"; "button"; "fieldset" ];
+  check_round_trips "input type" Types.input_type_of_string
+    Types.input_type_to_string
+    [
+      "text";
+      "password";
+      "hidden";
+      "checkbox";
+      "radio";
+      "file";
+      "submit";
+      "image";
+      "reset";
+      "button";
+      "select";
+      "textarea";
+      "color";
+    ]
+
+let test_oversized_task_identifiers () =
+  let html =
+    {|
+    <table class="stdlist"><tr>
+      <td>レポート</td>
+      <td><a href="course_999999999999999999999_report_999999999999999999999">Large</a></td>
+      <td>Course</td><td></td><td></td>
+    </tr></table>
+    |}
+  in
+  match Html.tasks html with
+  | [ task ] ->
+      Alcotest.(check (option int)) "course id" None task.Types.course_id;
+      Alcotest.(check (option int)) "task id" None task.id
+  | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)
+
 let test_repeated_field_overrides () =
   let fields =
     Manaba.add_fields
@@ -202,7 +298,17 @@ let test_flow_plan () =
       | uploads ->
           Alcotest.failf "expected one upload, got %d" (List.length uploads))
   | Ok steps -> Alcotest.failf "expected one step, got %d" (List.length steps)
-  | Error message -> Alcotest.fail message
+  | Error problem -> Alcotest.fail (Flow_plan.error_to_string problem)
+
+let test_flow_plan_structured_error () =
+  let json = Yojson.Safe.from_string {|[{"form": 0}]|} in
+  match Flow_plan.of_yojson json with
+  | Error (Flow_plan.Invalid_value { path; message }) ->
+      Alcotest.(check string) "path" "$[0].form" path;
+      Alcotest.(check string) "message" "1 以上で指定してください" message
+  | Error problem ->
+      Alcotest.failf "unexpected error: %s" (Flow_plan.error_to_string problem)
+  | Ok _ -> Alcotest.fail "invalid form index was accepted"
 
 let test_cookie_jar () =
   let path = Filename.temp_file "manaba-cookie-test" ".json" in
@@ -491,7 +597,7 @@ let test_report_round_trip () =
         (Printf.sprintf "http://127.0.0.1:%d/ct/" port)
         (Some session)
     in
-    ( Auth.login client.Manaba.http ~base_uri:client.base_uri
+    ( Auth.login (Manaba.http client) ~base_uri:(Manaba.base_uri client)
         ~username:"student" ~password:"password"
     >>= function
       | Error problem -> Alcotest.fail (Auth.error_to_string problem)
@@ -543,9 +649,17 @@ let () =
           Alcotest.test_case "image-only link" `Quick test_image_link;
           Alcotest.test_case "visible text" `Quick test_visible_text;
           Alcotest.test_case "report form" `Quick test_report_form;
+          Alcotest.test_case "unknown form domains" `Quick
+            test_unknown_form_domains_preserved;
+          Alcotest.test_case "form domain round trips" `Quick
+            test_form_domain_round_trips;
+          Alcotest.test_case "oversized task identifiers" `Quick
+            test_oversized_task_identifiers;
           Alcotest.test_case "repeated field overrides" `Quick
             test_repeated_field_overrides;
           Alcotest.test_case "flow plan" `Quick test_flow_plan;
+          Alcotest.test_case "flow plan structured error" `Quick
+            test_flow_plan_structured_error;
         ] );
       ( "cookies",
         [

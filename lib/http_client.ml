@@ -25,6 +25,9 @@ let create ~session_path =
     context = Cohttp_lwt_unix.Client.custom_ctx ~resolver:(resolver ()) ();
   }
 
+let save_session client = Cookie_jar.save client.jar
+let clear_session client = Cookie_jar.clear client.jar
+
 let add_default_headers client uri headers =
   let headers =
     Cohttp.Header.add_unless_exists headers "user-agent" client.user_agent

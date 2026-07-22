@@ -7,7 +7,17 @@ type step = {
 
 type t = step list
 
-let error path message = Error (Printf.sprintf "%s: %s" path message)
+type error =
+  | Invalid_value of { path : string; message : string }
+  | File_error of string
+  | Json_error of string
+
+let error_to_string = function
+  | Invalid_value { path; message } -> Printf.sprintf "%s: %s" path message
+  | File_error message -> message
+  | Json_error message -> "JSON: " ^ message
+
+let error path message = Error (Invalid_value { path; message })
 
 let strings path = function
   | `String value -> Ok [ value ]
@@ -93,5 +103,5 @@ let of_yojson = function
 
 let load path =
   try Util.read_file path |> Yojson.Safe.from_string |> of_yojson with
-  | Sys_error message -> Error message
-  | Yojson.Json_error message -> Error ("JSON: " ^ message)
+  | Sys_error message -> Error (File_error message)
+  | Yojson.Json_error message -> Error (Json_error message)

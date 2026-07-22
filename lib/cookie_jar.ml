@@ -104,48 +104,49 @@ let absorb_set_cookie jar ~origin value =
   let parts = String.split_on_char ';' value |> List.map String.trim in
   match parts with
   | [] -> ()
-  | pair :: attributes ->
+  | pair :: attributes -> (
       let name, value = Util.split_once '=' pair in
-      if value = None || String.trim name = "" then ()
-      else
-        let origin_host =
-          Uri.host origin |> Option.value ~default:"" |> Util.lowercase
-        in
-        let domain = ref origin_host in
-        let host_only = ref true in
-        let path = ref (default_cookie_path (Uri.path origin)) in
-        let secure = ref false in
-        let delete = ref false in
-        List.iter
-          (fun attribute ->
-            let key, attribute_value = Util.split_once '=' attribute in
-            match (Util.lowercase (String.trim key), attribute_value) with
-            | "domain", Some candidate ->
-                let candidate =
-                  candidate |> String.trim |> Util.lowercase |> fun value ->
-                  if Util.starts_with ~prefix:"." value then
-                    String.sub value 1 (String.length value - 1)
-                  else value
-                in
-                domain := candidate;
-                host_only := false
-            | "path", Some candidate -> path := String.trim candidate
-            | "secure", _ -> secure := true
-            | "max-age", Some candidate when String.trim candidate = "0" ->
-                delete := true
-            | _ -> ())
-          attributes;
-        let cookie =
-          {
-            name = String.trim name;
-            value = Option.get value;
-            domain = !domain;
-            path = !path;
-            secure = !secure;
-            host_only = !host_only;
-          }
-        in
-        if !delete then remove jar cookie else replace jar cookie
+      match (String.trim name, value) with
+      | "", _ | _, None -> ()
+      | name, Some value ->
+          let origin_host =
+            Uri.host origin |> Option.value ~default:"" |> Util.lowercase
+          in
+          let domain = ref origin_host in
+          let host_only = ref true in
+          let path = ref (default_cookie_path (Uri.path origin)) in
+          let secure = ref false in
+          let delete = ref false in
+          List.iter
+            (fun attribute ->
+              let key, attribute_value = Util.split_once '=' attribute in
+              match (Util.lowercase (String.trim key), attribute_value) with
+              | "domain", Some candidate ->
+                  let candidate =
+                    candidate |> String.trim |> Util.lowercase |> fun value ->
+                    if Util.starts_with ~prefix:"." value then
+                      String.sub value 1 (String.length value - 1)
+                    else value
+                  in
+                  domain := candidate;
+                  host_only := false
+              | "path", Some candidate -> path := String.trim candidate
+              | "secure", _ -> secure := true
+              | "max-age", Some candidate when String.trim candidate = "0" ->
+                  delete := true
+              | _ -> ())
+            attributes;
+          let cookie =
+            {
+              name;
+              value;
+              domain = !domain;
+              path = !path;
+              secure = !secure;
+              host_only = !host_only;
+            }
+          in
+          if !delete then remove jar cookie else replace jar cookie)
 
 let absorb_headers jar ~origin headers =
   Cohttp.Header.get_multi headers "set-cookie"
