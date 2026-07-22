@@ -1,0 +1,5 @@
+(library
+ (name manaba_cli_lib)
+ (public_name manaba_cli.lib)
+ (wrapped false)
+ (libraries cohttp-lwt-unix lambdasoup yojson str unix lwt.unix))

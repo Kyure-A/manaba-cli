@@ -1,0 +1,5 @@
+(executable
+ (name main)
+ (public_name manaba)
+ (package manaba_cli)
+ (libraries manaba_cli.lib cmdliner lwt.unix))

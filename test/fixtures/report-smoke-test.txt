@@ -1,0 +1,4 @@
+manaba-cli automated upload smoke test.
+
+This file contains no assignment answer or personal information. It is uploaded
+only to verify upload, final commit, and cancellation on 2026-07-22.
