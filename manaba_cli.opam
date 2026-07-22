@@ -13,6 +13,8 @@ depends: [
   "cmdliner"
   "cohttp-lwt-unix"
   "lambdasoup"
+  "lwt"
+  "uri"
   "yojson"
   "alcotest" {with-test}
   "odoc" {with-doc}

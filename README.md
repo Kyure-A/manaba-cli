@@ -12,17 +12,21 @@ OCaml 製 CLI です。2026 年 7 月現在の manaba 2.979 を対象にして�
 ## 開発とビルド
 
 ```console
-$ nix-shell
-$ dune build
+$ nix develop
+$ dune build @all
 $ dune runtest
 $ dune fmt
-$ dune exec manaba -- --help
 ```
 
-インストールする場合は `dune install` を実行します。
+開発シェルに入らずパッケージをビルド・実行することもできます。
 
-GitHub Actions では OCaml 5.1–5.5 の Linux ビルド、macOS ビルド、テスト、
-フォーマット、opam メタデータを検証します。manaba の SAML 認証入口も毎日確認します。
+```console
+$ nix build
+$ nix run . -- --help
+```
+
+GitHub Actions では Nix と opam の Linux/macOS ビルド、テスト、フォーマット、
+パッケージメタデータを検証します。manaba の SAML 認証入口も毎日確認します。
 
 ## ログイン
 

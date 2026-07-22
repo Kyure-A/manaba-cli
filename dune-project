@@ -15,5 +15,7 @@
   cmdliner
   cohttp-lwt-unix
   lambdasoup
+  lwt
+  uri
   yojson
   (alcotest :with-test)))
