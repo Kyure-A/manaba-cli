@@ -27,7 +27,7 @@ GitHub Actions では OCaml 5.1–5.5 の Linux ビルド、macOS ビルド、�
 ## ログイン
 
 ```console
-$ manaba auth login --username 13桁の統一認証ID
+$ manaba auth login -u 13桁の統一認証ID
 パスワード:
 $ manaba auth status
 logged in
@@ -36,6 +36,9 @@ logged in
 パスワードは画面に表示されません。セッションは既定で
 `$XDG_CONFIG_HOME/manaba-cli/session.json`、未設定なら
 `~/.config/manaba-cli/session.json` に保存されます。
+保存先は `MANABA_SESSION` または認証が必要な全コマンド共通の `--session FILE` で
+変更できます。認証コマンド、`--session`、`-u/--username`、`--password-stdin`、
+`-y/--yes` は姉妹ツールの `twins` と同じ構成です。
 貼り付けた場合も文字や `*` は表示されないため、そのまま Enter を押してください。
 macOS では、パスワードだけをコピーして次のようにクリップボードから直接読めます。
 
