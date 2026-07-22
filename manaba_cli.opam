@@ -11,8 +11,11 @@ depends: [
   "dune" {>= "3.12"}
   "ocaml" {>= "5.1"}
   "cmdliner"
+  "conduit-lwt-unix"
   "cohttp-lwt-unix"
   "lambdasoup"
+  "lwt"
+  "uri"
   "yojson"
   "alcotest" {with-test}
   "odoc" {with-doc}

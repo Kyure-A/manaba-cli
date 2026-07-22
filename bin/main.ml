@@ -82,7 +82,7 @@ let login_cmd =
     Arg.(
       value
       & opt (some string) None
-      & info [ "username"; "user" ] ~docv:"ID" ~doc:"統一認証 ID。省略時は対話入力します。")
+      & info [ "u"; "username" ] ~docv:"ID" ~doc:"統一認証 ID。省略時は対話入力します。")
   in
   let password_stdin =
     Arg.(
@@ -105,7 +105,9 @@ let auth_status client =
   | Ok _ ->
       print_endline "logged in";
       `Ok ()
-  | Error `Logged_out -> `Error (false, "logged out")
+  | Error `Logged_out ->
+      print_endline "logged out";
+      `Ok ()
   | Error (`Network message) -> `Error (false, message)
 
 let status_cmd =
