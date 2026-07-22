@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    name: Formatting and package metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@15d660006c1d3110d77c34b7faa3bddefe8b82f0 # v3.7.0
+        with:
+          ocaml-compiler: "5.5.x"
+          dune-cache: true
+      - name: Install formatting tools
+        run: opam install ocamlformat.0.29.0
+      - name: Check formatting
+        run: opam exec -- dune build @fmt
+      - name: Lint opam package metadata
+        run: opam lint manaba_cli.opam
+
+  build:
+    name: OCaml ${{ matrix.ocaml }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            ocaml: "5.1.x"
+          - os: ubuntu-latest
+            ocaml: "5.2.x"
+          - os: ubuntu-latest
+            ocaml: "5.3.x"
+          - os: ubuntu-latest
+            ocaml: "5.4.x"
+          - os: ubuntu-latest
+            ocaml: "5.5.x"
+          - os: macos-latest
+            ocaml: "5.5.x"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@15d660006c1d3110d77c34b7faa3bddefe8b82f0 # v3.7.0
+        with:
+          ocaml-compiler: ${{ matrix.ocaml }}
+          dune-cache: true
+      - name: Install dependencies
+        run: opam install . --deps-only --with-test
+      - name: Build library, CLI, and install artifacts
+        run: opam exec -- dune build @all @install
+      - name: Run tests
+        run: opam exec -- dune runtest
+      - name: Smoke-test executable
+        run: opam exec -- dune exec manaba -- --version

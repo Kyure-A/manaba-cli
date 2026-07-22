@@ -2,6 +2,8 @@
 opam-version: "2.0"
 synopsis: "CLI client for University of Tsukuba manaba"
 description: "Operate University of Tsukuba manaba from a terminal."
+maintainer: ["Kyure_A <49436968+Kyure-A@users.noreply.github.com>"]
+authors: ["Kyure_A"]
 license: "GPL-3.0-only"
 homepage: "https://github.com/Kyure-A/manaba-cli"
 bug-reports: "https://github.com/Kyure-A/manaba-cli/issues"

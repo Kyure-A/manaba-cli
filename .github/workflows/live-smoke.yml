@@ -1,0 +1,50 @@
+name: Live manaba smoke test
+
+on:
+  schedule:
+    - cron: "17 20 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-manaba-smoke
+  cancel-in-progress: true
+
+jobs:
+  authentication-entrypoint:
+    name: Authentication entrypoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify manaba redirects to the expected SAML form
+        shell: bash
+        run: |
+          set -euo pipefail
+          work_dir=$(mktemp -d)
+          trap 'rm -rf -- "$work_dir"' EXIT
+          cookie_jar="$work_dir/cookies"
+          page="$work_dir/login.html"
+
+          final_url=$(curl \
+            --fail \
+            --show-error \
+            --silent \
+            --location \
+            --max-time 30 \
+            --retry 3 \
+            --retry-all-errors \
+            --cookie "$cookie_jar" \
+            --cookie-jar "$cookie_jar" \
+            --output "$page" \
+            --write-out '%{url_effective}' \
+            https://manaba.tsukuba.ac.jp/ct/)
+
+          case "$final_url" in
+            https://idp.account.tsukuba.ac.jp/*) ;;
+            *) echo "Unexpected authentication URL: $final_url" >&2; exit 1 ;;
+          esac
+
+          grep --quiet 'shib_idp_ls_supported' "$page"
+          grep --quiet '_eventId_proceed' "$page"

@@ -3,6 +3,8 @@
 (generate_opam_files true)
 (source (github Kyure-A/manaba-cli))
 (license GPL-3.0-only)
+(authors Kyure_A)
+(maintainers "Kyure_A <49436968+Kyure-A@users.noreply.github.com>")
 
 (package
  (name manaba_cli)

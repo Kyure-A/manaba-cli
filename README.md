@@ -1,5 +1,8 @@
 # manaba-cli
 
+[![CI](https://github.com/Kyure-A/manaba-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Kyure-A/manaba-cli/actions/workflows/ci.yml)
+[![Live manaba smoke test](https://github.com/Kyure-A/manaba-cli/actions/workflows/live-smoke.yml/badge.svg)](https://github.com/Kyure-A/manaba-cli/actions/workflows/live-smoke.yml)
+
 筑波大学の [manaba](https://manaba.tsukuba.ac.jp/) をターミナルから操作する
 OCaml 製 CLI です。2026 年 7 月現在の manaba 2.979 を対象にしています。
 
@@ -17,6 +20,9 @@ $ dune exec manaba -- --help
 ```
 
 インストールする場合は `dune install` を実行します。
+
+GitHub Actions では OCaml 5.1–5.5 の Linux ビルド、macOS ビルド、テスト、
+フォーマット、opam メタデータを検証します。manaba の SAML 認証入口も毎日確認します。
 
 ## ログイン
 
