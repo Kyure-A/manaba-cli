@@ -9,7 +9,7 @@ let attribute name node = Soup.attribute name node
 
 let integer_match expression value group =
   if Str.string_match expression value 0 then
-    try Some (int_of_string (Str.matched_group group value)) with _ -> None
+    int_of_string_opt (Str.matched_group group value)
   else None
 
 let courses html =
@@ -58,9 +58,12 @@ let parse_task_href href =
       "^course_\\([0-9]+\\)_\\(query\\|drill\\|survey\\|report\\)_\\([0-9]+\\)"
   in
   if Str.string_match expression href 0 then
-    let course_id = int_of_string (Str.matched_group 1 href) in
-    let item_id = int_of_string (Str.matched_group 3 href) in
-    (Some course_id, Some item_id)
+    match
+      ( int_of_string_opt (Str.matched_group 1 href),
+        int_of_string_opt (Str.matched_group 3 href) )
+    with
+    | Some course_id, Some item_id -> (Some course_id, Some item_id)
+    | _ -> (None, None)
   else (None, None)
 
 let tasks html =
@@ -116,15 +119,18 @@ let links html =
   |> Util.deduplicate_by (fun (link : link) -> link.href ^ "\000" ^ link.text)
 
 let control_of_node node =
-  let tag = Soup.name node in
+  let tag_name = Soup.name node in
+  let tag = control_tag_of_string tag_name in
   let input_type =
     match attribute "type" node with
-    | Some value -> Util.lowercase value
-    | None -> if tag = "textarea" then "textarea" else tag
+    | Some value -> input_type_of_string (Util.lowercase value)
+    | None ->
+        input_type_of_string
+          (if tag_name = "textarea" then "textarea" else tag_name)
   in
   let multiple = Soup.has_attribute "multiple" node in
   let options =
-    if tag = "select" then
+    if match tag with Select -> true | _ -> false then
       Soup.select "option" node |> Soup.to_list
       |> List.map (fun option ->
           {
@@ -145,12 +151,12 @@ let control_of_node node =
   in
   let value =
     match (tag, input_type) with
-    | "input", ("checkbox" | "radio") ->
+    | Input, (Checkbox | Radio) ->
         if Soup.has_attribute "checked" node then
           Some (Option.value ~default:"on" (attribute "value" node))
         else None
-    | "input", "file" -> None
-    | "select", _ ->
+    | Input, File -> None
+    | Select, _ ->
         let selected = List.find_opt (fun option -> option.selected) options in
         let selected =
           match (selected, multiple) with
@@ -160,9 +166,9 @@ let control_of_node node =
           | None, true -> None
         in
         Option.map (fun (option : form_option) -> option.value) selected
-    | "textarea", _ -> Some (Soup.texts node |> String.concat "")
-    | "button", _ -> Some (Option.value ~default:"" (attribute "value" node))
-    | "input", _ -> Some (Option.value ~default:"" (attribute "value" node))
+    | Textarea, _ -> Some (Soup.texts node |> String.concat "")
+    | Button, _ -> Some (Option.value ~default:"" (attribute "value" node))
+    | Input, _ -> Some (Option.value ~default:"" (attribute "value" node))
     | _ -> attribute "value" node
   in
   { tag; input_type; name = attribute "name" node; value; options; multiple }
@@ -173,12 +179,14 @@ let forms html =
   |> List.map (fun form ->
       let action = Option.value ~default:"" (attribute "action" form) in
       let method_ =
-        attribute "method" form |> Option.value ~default:"get" |> Util.lowercase
+        attribute "method" form
+        |> Option.value ~default:"get"
+        |> Util.lowercase |> form_method_of_string
       in
       let enctype =
         attribute "enctype" form
         |> Option.value ~default:"application/x-www-form-urlencoded"
-        |> Util.lowercase
+        |> Util.lowercase |> form_enctype_of_string
       in
       let controls =
         [ "input"; "textarea"; "select"; "button" ]
@@ -192,10 +200,8 @@ let default_fields form =
   form.controls
   |> List.concat_map (fun control ->
       match (control.name, control.input_type) with
-      | Some _, ("submit" | "button" | "image" | "file" | "password" | "reset")
-        ->
-          []
-      | Some name, "select" ->
+      | Some _, (Submit | Button_type | Image | File | Password | Reset) -> []
+      | Some name, Select_type ->
           let selected =
             List.filter (fun option -> option.selected) control.options
           in
@@ -218,12 +224,12 @@ let submission_fields ?button_name form =
     form.controls
     |> List.filter_map (fun control ->
         match (control.name, control.value, control.input_type) with
-        | Some _, Some _, ("submit" | "image") -> Some control
+        | Some _, Some _, (Submit | Image) -> Some control
         | _ -> None)
   in
   let fields control =
     match (control.name, control.value, control.input_type) with
-    | Some name, _, "image" -> [ (name ^ ".x", "0"); (name ^ ".y", "0") ]
+    | Some name, _, Image -> [ (name ^ ".x", "0"); (name ^ ".y", "0") ]
     | Some name, Some value, _ -> [ (name, value) ]
     | _ -> []
   in
@@ -240,7 +246,10 @@ let submission_fields ?button_name form =
       | _ -> defaults)
 
 let contains_password form =
-  List.exists (fun control -> control.input_type = "password") form.controls
+  List.exists
+    (fun control ->
+      match control.input_type with Password -> true | _ -> false)
+    form.controls
 
 let contains_control name form =
   List.exists (fun control -> control.name = Some name) form.controls
@@ -251,10 +260,12 @@ let find_form_by_control name forms =
 let submit_controls form =
   form.controls
   |> List.filter (fun control ->
-      control.input_type = "submit" || control.input_type = "image")
+      match control.input_type with Submit | Image -> true | _ -> false)
 
 let file_controls form =
-  List.filter (fun control -> control.input_type = "file") form.controls
+  List.filter
+    (fun control -> match control.input_type with File -> true | _ -> false)
+    form.controls
 
 let main_text html =
   let soup = parse html in

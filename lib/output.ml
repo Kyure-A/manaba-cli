@@ -36,7 +36,7 @@ let print_links ~json links =
 let print_control (control : form_control) =
   let name = Option.value ~default:"(unnamed)" control.name in
   let sensitive =
-    control.input_type = "hidden" || control.input_type = "password"
+    match control.input_type with Hidden | Password -> true | _ -> false
   in
   let current =
     if sensitive then ""
@@ -45,7 +45,10 @@ let print_control (control : form_control) =
       | None -> ""
       | Some value -> Printf.sprintf " value=%S" value
   in
-  Printf.printf "    %-10s %-12s %s%s%s\n" control.tag control.input_type name
+  Printf.printf "    %-10s %-12s %s%s%s\n"
+    (control_tag_to_string control.tag)
+    (input_type_to_string control.input_type)
+    name
     (if control.multiple then " multiple" else "")
     current;
   List.iter
@@ -61,7 +64,8 @@ let print_forms ~json forms =
     List.iteri
       (fun index (form : form) ->
         Printf.printf "[%d] %s %s (%s)\n" (index + 1)
-          (String.uppercase_ascii form.method_)
-          form.action form.enctype;
+          (form.method_ |> form_method_to_string |> String.uppercase_ascii)
+          form.action
+          (form_enctype_to_string form.enctype);
         List.iter print_control form.controls)
       forms

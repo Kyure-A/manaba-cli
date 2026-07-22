@@ -9,6 +9,8 @@ type error =
   | Form_error of string
   | Io_error of string
 
+type 'a outcome = ('a, error) result Lwt.t
+
 let error_to_string = function
   | Authentication_required -> "ログインが必要です。`manaba auth login` を実行してください。"
   | Http_error (status, message) -> Printf.sprintf "HTTP %d: %s" status message
@@ -31,6 +33,10 @@ let create base_url session_path =
     base_uri = normalize_base base_url;
     session_path;
   }
+
+let http client = client.http
+let base_uri client = client.base_uri
+let session_path client = client.session_path
 
 let effective_port uri =
   match Uri.port uri with
@@ -70,7 +76,7 @@ let validate client response =
     else
       Error (Http_error (status, Cohttp.Code.string_of_status response.status))
 
-let persist client = Cookie_jar.save client.http.Http_client.jar
+let persist client = Http_client.save_session client.http
 
 let get client target =
   match resolve client target with
@@ -124,10 +130,16 @@ let submit_form client ~source_response ~form ~fields ~uploads ?button_name () =
         add_fields defaults fields
       in
       let request =
-        if form.method_ = "get" then Http_client.get_form client.http uri fields
-        else if uploads <> [] || form.enctype = "multipart/form-data" then
-          Http_client.post_multipart client.http uri fields uploads
-        else Http_client.post_form client.http uri fields
+        match form.method_ with
+        | Types.Get -> Http_client.get_form client.http uri fields
+        | Types.Post | Types.Other_method _ -> (
+            match form.enctype with
+            | Types.Multipart ->
+                Http_client.post_multipart client.http uri fields uploads
+            | Types.Url_encoded | Types.Other_enctype _ ->
+                if uploads = [] then
+                  Http_client.post_form client.http uri fields
+                else Http_client.post_multipart client.http uri fields uploads)
       in
       Lwt.catch
         (fun () ->
@@ -406,8 +418,9 @@ let report_cancel client ~course_id ~report_id =
           (fun form ->
             List.find_opt
               (fun control ->
-                (control.Types.input_type = "submit"
-                || control.input_type = "button")
+                (match control.Types.input_type with
+                  | Types.Submit | Types.Button_type -> true
+                  | _ -> false)
                 && is_cancel_name control.name)
               form.Types.controls
             |> Option.map (fun control -> (form, control)))
