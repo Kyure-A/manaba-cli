@@ -13,17 +13,17 @@ Passwords are never stored. Session cookies are saved with mode `0600` under
 ## Build
 
 ```console
-$ nix develop
-$ dune build @all
-$ dune runtest
-$ dune fmt
+nix develop
+dune build @all
+dune runtest
+dune fmt
 ```
 
 Build or run directly through Nix:
 
 ```console
-$ nix build
-$ nix run . -- --help
+nix build
+nix run . -- --help
 ```
 
 CI builds and tests the flake and opam package on Linux and macOS. A scheduled
@@ -32,11 +32,11 @@ smoke test also checks the live SAML login entry point.
 ## Authentication
 
 ```console
-$ manaba auth login -u USERNAME
+manaba auth login -u USERNAME
 Password:
-$ manaba auth status
+manaba auth status
 logged in
-$ manaba auth logout
+manaba auth logout
 ```
 
 Use `--password-stdin` for automation or `--password-clipboard` on macOS. Set
@@ -45,22 +45,22 @@ Use `--password-stdin` for automation or `--password-clipboard` on macOS. Set
 ## Commands
 
 ```console
-$ manaba courses
-$ manaba tasks
-$ manaba course COURSE_ID
-$ manaba news COURSE_ID
-$ manaba quizzes COURSE_ID
-$ manaba surveys COURSE_ID
-$ manaba reports COURSE_ID
-$ manaba projects COURSE_ID
-$ manaba topics COURSE_ID
-$ manaba contents COURSE_ID
-$ manaba grades COURSE_ID
-$ manaba submissions
-$ manaba portfolio
-$ manaba reminders
-$ manaba memos
-$ manaba settings
+manaba courses
+manaba tasks
+manaba course COURSE_ID
+manaba news COURSE_ID
+manaba quizzes COURSE_ID
+manaba surveys COURSE_ID
+manaba reports COURSE_ID
+manaba projects COURSE_ID
+manaba topics COURSE_ID
+manaba contents COURSE_ID
+manaba grades COURSE_ID
+manaba submissions
+manaba portfolio
+manaba reminders
+manaba memos
+manaba settings
 ```
 
 List commands support `--json`. Other browser features are available through:
@@ -76,18 +76,18 @@ Run `manaba COMMAND --help` for arguments and options.
 ### Examples
 
 ```console
-$ manaba download 'course_123_page_456/file.pdf' -o file.pdf
-$ manaba report submit COURSE_ID REPORT_ID answer.pdf
-$ manaba report cancel COURSE_ID REPORT_ID
-$ manaba thread create COURSE_ID 'Subject' 'Body'
-$ manaba registration search --code GE --name 'Seminar'
+manaba download 'course_123_page_456/file.pdf' -o file.pdf
+manaba report submit COURSE_ID REPORT_ID answer.pdf
+manaba report cancel COURSE_ID REPORT_ID
+manaba thread create COURSE_ID 'Subject' 'Body'
+manaba registration search --code GE --name 'Seminar'
 ```
 
 Inspect and submit an unsupported form:
 
 ```console
-$ manaba forms --json 'course_123_topics?action=newthread'
-$ manaba submit 'course_123_topics?action=newthread' --form 1 \
+manaba forms --json 'course_123_topics?action=newthread'
+manaba submit 'course_123_topics?action=newthread' --form 1 \
     --field 'Title=Subject' --field 'Body=Message'
 ```
 

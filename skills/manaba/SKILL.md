@@ -104,6 +104,31 @@ Use `submit` or `flow` only when no dedicated command exists and the requested
 mutation is explicit. Let the CLI carry hidden fields forward; never attempt to
 extract or reveal hidden token values.
 
+### Handle multi-step quizzes
+
+Treat a quiz that exposes only `スタート` on `GET` as a multi-step form. The
+answer form may exist only in the response to that start `POST`; running `get`
+or `forms --json` against the original quiz path afterward can return the
+start page again. This is an inspection limitation, not evidence that the
+question or saved attempt disappeared.
+
+- Prefer one `flow` from the original quiz path so cookies, hidden controls,
+  intermediate response bodies, and changed form actions carry forward.
+- Do not split the attempt into unrelated `submit` calls, guess `qid*` names or
+  button names, or inspect the session cookie.
+- Remember that `submit` currently prints only main text and does not expose the
+  response URL or its form structure. If the next form is unknown, add or use a
+  structured post-response inspection path before the final submission rather
+  than replaying mutations blindly.
+- A common current sequence is
+  `action_QueryStudent_querystart` → answer field such as `qid1` plus
+  `action_QueryStudent_queryshow_confirm` → `action_QueryStudent_querydone`.
+  Treat these names as observed examples and verify them for the target quiz.
+- Before the final step, verify that the confirmation response contains the
+  complete answer and satisfies any length requirement. After submission, run
+  `get QUIZ_PATH` and `submissions`; require both the quiz state `提出済み` and
+  a matching submission-history row.
+
 ## Handle failures
 
 - On an argument error, inspect only the relevant `COMMAND --help=plain` and
