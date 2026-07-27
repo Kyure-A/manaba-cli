@@ -1,0 +1,4 @@
+interface:
+  display_name: "manaba"
+  short_description: "筑波大学manabaの確認・提出・設定をCLIで安全に操作"
+  default_prompt: "$manaba を使って未提出課題と締切を確認し、期限順にまとめてください。"
