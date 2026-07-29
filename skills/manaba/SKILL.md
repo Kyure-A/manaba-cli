@@ -1,25 +1,26 @@
 ---
 name: manaba
-description: Operate Kyre's University of Tsukuba manaba account through the local manaba CLI. Use whenever a request mentions manaba, courses, pending assignments, reports, quizzes, surveys, submissions, grades, course news or content, attachments, reminders, portfolio, registration, bulletin-board posts, memos, profile settings, favorites, or asks to submit, cancel, download, post, enroll, or change anything in manaba. Resolve human names to CLI IDs, prefer structured reads, and handle account mutations safely.
+description: Operate Kyre's University of Tsukuba manaba account through the canonical GitHub Nix flake. Use whenever a request mentions manaba, courses, pending assignments, reports, quizzes, surveys, submissions, grades, course news or content, attachments, reminders, portfolio, registration, bulletin-board posts, memos, profile settings, favorites, or asks to submit, cancel, download, post, enroll, or change anything in manaba. Resolve human names to CLI IDs, prefer structured reads, and handle account mutations safely.
 ---
 
 # manaba
 
-Use the repository checkout of `manaba` as the execution layer. Begin with the
-requested operation instead of rereading the repository or README.
+Use the canonical GitHub flake of `manaba` as the execution layer. Begin with
+the requested operation instead of rereading the repository or README.
 
-## Use only the canonical CLI
+## Use only the canonical GitHub flake
 
 Prefix every direct command with:
-`nix run /Users/kyre/ghq/github.com/Kyure-A/manaba-cli --`
+`nix run github:Kyure-A/manaba-cli --`
 
-- Never run the PATH/global `manaba`, probe it with `command -v`, or fall back to
-  it. Kyre's installed binary is a known legacy CLI with an incompatible
-  interface.
-- Require the canonical checkout and its `flake.nix`. If either is absent,
-  report that exact blocker instead of substituting another binary.
-- Treat the canonical `COMMAND --help=plain` output as the source of truth for
-  exact arguments. Consult source files only when the help is insufficient.
+- Never run the PATH/global `manaba`, probe it with `command -v`, or use a local
+  checkout or local flake. Kyre's installed binary is a known legacy CLI with
+  an incompatible interface.
+- Require both Nix and resolution of `github:Kyure-A/manaba-cli`. If Nix is
+  unavailable or the GitHub flake cannot be resolved, report that exact blocker
+  instead of substituting another binary or checkout.
+- Treat the GitHub flake's `COMMAND --help=plain` output as the source of truth
+  for exact arguments. Consult source files only when the help is insufficient.
 
 Do not change `--base-url` unless the user explicitly requests another manaba
 instance or a test server. Preserve `MANABA_SESSION` when it is already set.
