@@ -1,36 +1,52 @@
 ---
 name: manaba
-description: Operate Kyre's University of Tsukuba manaba account through the local manaba CLI. Use whenever a request mentions manaba, courses, pending assignments, reports, quizzes, surveys, submissions, grades, course news or content, attachments, reminders, portfolio, registration, bulletin-board posts, memos, profile settings, favorites, or asks to submit, cancel, download, post, enroll, or change anything in manaba. Resolve human names to CLI IDs, prefer structured reads, and handle account mutations safely.
+description: Operate Kyre's University of Tsukuba manaba account through the canonical GitHub Nix flake. Use whenever a request mentions manaba, courses, pending assignments, reports, quizzes, surveys, submissions, grades, course news or content, attachments, reminders, portfolio, registration, bulletin-board posts, memos, profile settings, favorites, or asks to submit, cancel, download, post, enroll, or change anything in manaba. Resolve human names to CLI IDs, prefer structured reads, and handle account mutations safely.
 ---
 
 # manaba
 
-Use the local `manaba` CLI as the execution layer. Begin with the requested
-operation instead of rereading the repository or README.
+Use the canonical GitHub flake of `manaba` as the execution layer. Begin with
+the requested operation instead of rereading the repository or README.
 
-## Resolve the CLI
+## Use only the canonical GitHub flake
 
-1. Use `manaba` when `command -v manaba` succeeds.
-2. Otherwise prefix commands with:
-   `nix run /Users/kyre/ghq/github.com/Kyure-A/manaba-cli --`
-3. If neither route is available, report that the CLI must be built or installed.
-4. Treat `manaba COMMAND --help=plain` as the source of truth for exact arguments.
-   Consult source files only when the CLI help is insufficient.
+Prefix every direct command with:
+`nix run github:Kyure-A/manaba-cli --`
+
+- Never run the PATH/global `manaba`, probe it with `command -v`, or use a local
+  checkout or local flake. Kyre's installed binary is a known legacy CLI with
+  an incompatible interface.
+- Require both Nix and resolution of `github:Kyure-A/manaba-cli`. If Nix is
+  unavailable or the GitHub flake cannot be resolved, report that exact blocker
+  instead of substituting another binary or checkout.
+- Treat the GitHub flake's `COMMAND --help=plain` output as the source of truth
+  for exact arguments. Consult source files only when the help is insufficient.
 
 Do not change `--base-url` unless the user explicitly requests another manaba
 instance or a test server. Preserve `MANABA_SESSION` when it is already set.
 
 ## Authenticate
 
-Run `auth status` once before the first authenticated operation in a task. If the
-session is logged out or expired, ask the user to log in with `auth login`.
+Run canonical `auth status` once before the first authenticated operation in a
+task. If the session is logged out, expired, or an authenticated request reports
+that login is required, recover it through Kyre's existing Bitwarden Secrets
+Manager adapter:
 
-- Never request a password in chat, display one, inspect the session file, or put
-  a password directly in shell arguments.
-- Use interactive password entry by default.
-- Use `--password-clipboard` only when the user explicitly asks to use the macOS
-  clipboard, and do not inspect the clipboard.
-- Remember that the CLI stores only session cookies, normally under
+```sh
+cd /Users/kyre/ghq/github.com/Kyure-A/self
+nix develop -c npm run self -- secrets exec -- \
+  npm run self -- university login
+```
+
+Then verify canonical `auth status` and resume the original request.
+
+- Never ask Kyre to log in manually or re-provide credentials while this
+  recovery path is available.
+- Never request or display a password, inspect the session file, print secret
+  environment variables, or put credentials directly in shell arguments.
+- If recovery fails, report the exact failing layer only after the managed path
+  has actually been attempted. Do not replace it with an interactive login.
+- The CLI stores only session cookies, normally under
   `~/.config/manaba-cli/session.json`.
 
 ## Read data
