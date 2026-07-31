@@ -139,15 +139,28 @@ let control_of_node node =
             label = text option;
             selected = Soup.has_attribute "selected" option;
           })
-    else []
+    else
+      match input_type with
+      (* Unchecked radios/checkboxes keep value=None for submission defaults, but
+         expose the wire value in options so agents can inspect and auto-fill. *)
+      | Radio | Checkbox ->
+          [
+            {
+              value = Option.value ~default:"on" (attribute "value" node);
+              label = "";
+              selected = Soup.has_attribute "checked" node;
+            };
+          ]
+      | _ -> []
   in
   let options =
     if multiple || List.exists (fun option -> option.selected) options then
       options
     else
-      match options with
-      | [] -> []
-      | (first : form_option) :: rest -> { first with selected = true } :: rest
+      match (tag, options) with
+      | Select, (first : form_option) :: rest ->
+          { first with selected = true } :: rest
+      | _ -> options
   in
   let value =
     match (tag, input_type) with
@@ -217,6 +230,47 @@ let default_fields form =
       | Some name, _ ->
           Option.to_list (Option.map (fun value -> (name, value)) control.value)
       | None, _ -> [])
+
+(* Fill unanswered radio groups / single selects with the first offered value.
+   Useful for optional drills and multi-step quizzes when exact answers are not
+   required. Explicit fields should be merged on top by the caller. *)
+let first_choice_fields form =
+  let radios =
+    form.controls
+    |> List.filter_map (fun control ->
+        match (control.name, control.input_type, control.options) with
+        | Some name, Radio, (option : form_option) :: _ ->
+            Some (name, option.value)
+        | Some name, Radio, [] -> (
+            match control.value with
+            | Some value -> Some (name, value)
+            | None -> None)
+        | _ -> None)
+  in
+  let by_name =
+    List.fold_left
+      (fun acc (name, value) ->
+        match List.assoc_opt name acc with
+        | Some values ->
+            (name, values @ [ value ]) :: List.remove_assoc name acc
+        | None -> (name, [ value ]) :: acc)
+      [] radios
+  in
+  let radio_fields =
+    List.filter_map
+      (fun (name, values) ->
+        match values with value :: _ -> Some (name, value) | [] -> None)
+      by_name
+  in
+  let select_fields =
+    form.controls
+    |> List.filter_map (fun control ->
+        match (control.name, control.input_type, control.options) with
+        | Some name, Select_type, (option : form_option) :: _ ->
+            Some (name, option.value)
+        | _ -> None)
+  in
+  radio_fields @ select_fields
 
 let submission_fields ?button_name form =
   let defaults = default_fields form in

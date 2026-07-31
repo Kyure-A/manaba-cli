@@ -1,8 +1,11 @@
+type auto_fill = First_choice
+
 type step = {
   form_index : int option;
   button_name : string option;
   fields : (string * string) list;
   uploads : Http_client.upload list;
+  auto : auto_fill option;
 }
 
 type t = step list
@@ -58,10 +61,16 @@ let optional_positive_int path = function
 
 let member name entries = List.assoc_opt name entries
 
+let optional_auto path = function
+  | None | Some `Null -> Ok None
+  | Some (`String "first-choice") -> Ok (Some First_choice)
+  | Some (`String _) -> error path "first-choice のみ対応しています"
+  | Some _ -> error path "文字列が必要です"
+
 let parse_step index = function
   | `Assoc entries -> (
       let path = Printf.sprintf "$[%d]" index in
-      let known = [ "form"; "button"; "fields"; "files" ] in
+      let known = [ "form"; "button"; "fields"; "files"; "auto" ] in
       let unknown =
         List.find_opt (fun (name, _) -> not (List.mem name known)) entries
       in
@@ -72,19 +81,21 @@ let parse_step index = function
             ( optional_positive_int (path ^ ".form") (member "form" entries),
               optional_string (path ^ ".button") (member "button" entries),
               pairs (path ^ ".fields") (member "fields" entries),
-              pairs (path ^ ".files") (member "files" entries) )
+              pairs (path ^ ".files") (member "files" entries),
+              optional_auto (path ^ ".auto") (member "auto" entries) )
           with
-          | Ok form_index, Ok button_name, Ok fields, Ok files ->
+          | Ok form_index, Ok button_name, Ok fields, Ok files, Ok auto ->
               let uploads =
                 List.map
                   (fun (field, path) -> Http_client.{ field; path })
                   files
               in
-              Ok { form_index; button_name; fields; uploads }
-          | Error message, _, _, _
-          | _, Error message, _, _
-          | _, _, Error message, _
-          | _, _, _, Error message ->
+              Ok { form_index; button_name; fields; uploads; auto }
+          | Error message, _, _, _, _
+          | _, Error message, _, _, _
+          | _, _, Error message, _, _
+          | _, _, _, Error message, _
+          | _, _, _, _, Error message ->
               Error message))
   | _ -> error (Printf.sprintf "$[%d]" index) "オブジェクトが必要です"
 

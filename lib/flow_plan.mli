@@ -1,8 +1,11 @@
+type auto_fill = First_choice
+
 type step = {
   form_index : int option;
   button_name : string option;
   fields : (string * string) list;
   uploads : Http_client.upload list;
+  auto : auto_fill option;
 }
 
 type t = step list

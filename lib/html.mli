@@ -4,6 +4,9 @@ val links : string -> Types.link list
 val forms : string -> Types.form list
 val default_fields : Types.form -> (string * string) list
 
+(* First radio/select option per field name. Callers merge explicit fields on top. *)
+val first_choice_fields : Types.form -> (string * string) list
+
 val submission_fields :
   ?button_name:string -> Types.form -> (string * string) list
 

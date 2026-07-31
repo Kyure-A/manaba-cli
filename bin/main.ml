@@ -305,17 +305,35 @@ let confirm yes description =
     | "y" | "yes" -> true
     | _ -> false)
 
-let form_submit target index fields files button yes client =
-  if not (confirm yes (Printf.sprintf "%s のフォーム %d を送信します。" target index)) then
-    `Error (false, "送信を中止しました。")
+let forms_json_flag =
+  Arg.(
+    value & flag
+    & info [ "forms-json" ] ~doc:"応答 HTML のフォーム構造を JSON で出力します（本文テキストの代わり）。")
+
+let print_response_body ~forms_json body =
+  if forms_json then Output.print_forms ~json:true (Html.forms body)
+  else print_endline (Html.main_text body)
+
+let form_submit target index fields files button yes forms_json client =
+  let description =
+    match button with
+    | Some name -> Printf.sprintf "%s の送信ボタン %s を押します。" target name
+    | None -> Printf.sprintf "%s のフォーム %d を送信します。" target index
+  in
+  if not (confirm yes description) then `Error (false, "送信を中止しました。")
   else
     let uploads =
       List.map (fun (field, path) -> Http_client.{ field; path }) files
     in
-    lwt_result
-      (Manaba.submit_index client ~target ~index ~fields ~uploads
-         ?button_name:button ()) (fun response ->
-        print_endline (Html.main_text response.Http_client.body))
+    let promise =
+      match button with
+      | Some button_name ->
+          (* Prefer button lookup: manaba pages often put Google Calendar as form 1. *)
+          Manaba.submit_named client ~target ~button_name ~fields ~uploads
+      | None -> Manaba.submit_index client ~target ~index ~fields ~uploads ()
+    in
+    lwt_result promise (fun response ->
+        print_response_body ~forms_json response.Http_client.body)
 
 let form_submit_cmd =
   let index =
@@ -343,11 +361,11 @@ let form_submit_cmd =
     Term.(
       ret
         (const form_submit $ target $ index $ fields $ files $ button $ yes
-       $ client))
+       $ forms_json_flag $ client))
 
 let yes_flag = Arg.(value & flag & info [ "yes"; "y" ] ~doc:"確認なしで実行します。")
 
-let flow target plan_path yes client =
+let flow target plan_path yes forms_json client =
   match Flow_plan.load plan_path with
   | Error problem -> `Error (false, Flow_plan.error_to_string problem)
   | Ok steps ->
@@ -359,7 +377,7 @@ let flow target plan_path yes client =
       then `Error (false, "送信を中止しました。")
       else
         lwt_result (Manaba.run_flow client ~target steps) (fun response ->
-            print_endline (Html.main_text response.Http_client.body))
+            print_response_body ~forms_json response.Http_client.body)
 
 let flow_cmd =
   let plan =
@@ -367,7 +385,8 @@ let flow_cmd =
   in
   Cmd.v
     (command_info "flow" "JSON 手順に従って複数画面のフォームを連続送信します。")
-    Term.(ret (const flow $ target $ plan $ yes_flag $ client))
+    Term.(
+      ret (const flow $ target $ plan $ yes_flag $ forms_json_flag $ client))
 
 let favorite desired course_id yes client =
   let description =
