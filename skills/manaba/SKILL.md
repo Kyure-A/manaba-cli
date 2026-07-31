@@ -82,12 +82,49 @@ when multiple plausible matches remain; never guess an ambiguous target.
 Preserve exact course names, assignment names, statuses, and deadlines in the
 answer. Clearly distinguish values returned by manaba from any inference.
 
+### Interpret `tasks` carefully
+
+`tasks --json` is manaba's outstanding-task page, not a graded to-do list.
+
+- Items may remain listed even when the course already has a completed
+  alternative path (example: INFOSS English drills stay open after the Japanese
+  path is complete; official guidance says both tracks are not required).
+- Before treating an open task as mandatory work, open the course news /
+  content / quiz description and check optionality, language track, and
+  completion requirements.
+- Optional noise may still need action if the user explicitly wants it gone
+  from the outstanding list; say that clearly when choosing to complete it.
+
+### Course materials and videos
+
+Prefer materials that manaba can actually deliver:
+
+1. Attachments on content pages (PDF/PPT via `links` + `download`)
+2. Page text from `get`
+3. Video **URLs** listed on the page (SharePoint / Stream / OneDrive links)
+
+Do **not** claim to watch or transcribe lecture video through this CLI.
+
+- manaba-cli only requests the manaba origin. SharePoint/Stream hosts are
+  rejected as off-origin.
+- Listing a video URL with `links` or `get` is fine; fetching the media,
+  captions, or transcript is out of scope here.
+- If a quiz depends on video-only content and no downloadable notes exist,
+  report that blocker instead of inventing answers from the URL alone.
+- Captioned videos often have a parallel PDF on the same content page; download
+  that first when present.
+
 ## Download files
 
 Use `links --json PATH` to discover the exact attachment path when needed, then
 use `download PATH --output FILE`. Confirm the intended output path when it is
 ambiguous, avoid overwriting an existing file without authorization, and return
 a clickable absolute path to the downloaded file.
+
+Attachment paths are often long and percent-encoded (for example
+`page_…/….pdf`). Prefer the href from `links --json` or raw HTML over guessing
+from the visible file name. Downloading a content page path itself can return
+HTML rather than the PDF.
 
 ## Change data
 
@@ -120,48 +157,111 @@ Use `submit` or `flow` only when no dedicated command exists and the requested
 mutation is explicit. Let the CLI carry hidden fields forward; never attempt to
 extract or reveal hidden token values.
 
-When `--button NAME` is passed to `submit`, the CLI selects the form that
-contains that button. Do not assume form index 1 is the assignment form; many
-course pages put a Google Calendar widget first.
+### Choose forms with `--button`, not form index 1
 
-### Handle multi-step quizzes and drills
+Many course pages put a Google Calendar widget as form 1. That form's action is
+off-origin and will fail if submitted.
 
-Treat a quiz/drill that exposes only `スタート` on `GET` as a multi-step form.
-The answer form may exist only in the response to that start `POST`; running
-`get` or `forms --json` against the original path afterward can return the
-start page again. This is an inspection limitation, not evidence that the
-question or saved attempt disappeared.
+- Prefer `submit --yes --button BUTTON_NAME PATH`.
+- With `--button`, the CLI selects the form that contains that button.
+- Do not assume `--form 1` is the assignment form.
+- Confirm button names with `forms --json PATH` on the start page, or with
+  `--forms-json` on a post-start response (below).
 
-- Prefer one `flow` from the original quiz/drill path so cookies, hidden
-  controls, intermediate response bodies, and changed form actions carry
-  forward.
-- Do not split the attempt into unrelated `submit` calls, guess `qid*` names or
-  button names, or inspect the session cookie.
-- To inspect the post-start answer form without guessing, use
-  `submit --yes --forms-json --button START_BUTTON PATH` or
-  `flow --yes --forms-json PATH PLAN.json`. `--forms-json` prints the response
-  forms as JSON instead of main text. Unchecked radios expose their wire
-  values under each control's `options` array.
-- Flow steps may set `"auto": "first-choice"` to pick the first radio/select
-  option for each unanswered field before applying explicit `fields`. Use this
-  only when exact answers are not required.
-- Observed quiz sequence (verify per target):
-  `action_QueryStudent_querystart` → answer field such as `qid1` plus
-  `action_QueryStudent_queryshow_confirm` → `action_QueryStudent_querydone`.
-- Observed drill sequence (INFOSS-style, verify per target):
-  `action_DrillStudent_querystart` → `qid*` answers plus
-  `action_DrillStudent_next_queryshow` → `action_DrillStudent_querydone`.
-- Before the final step, verify that the confirmation response contains the
-  complete answer and satisfies any length or pass-score requirement. After
-  submission, run `get PATH` and `tasks --json`; require the target state
-  (`提出済み` / `合格済み`) and that it no longer appears as an open task when
-  that was the goal.
+### Inspect post-start forms with `--forms-json`
+
+`get PATH` and `forms --json PATH` only see the **current GET** page. After a
+quiz/drill start POST, the answer form often exists only in that response.
+Re-GETting the original path can show the start page again. That is an
+inspection limitation, not proof that the attempt vanished.
+
+To inspect without guessing field names:
+
+```text
+submit --yes --forms-json --button START_BUTTON PATH
+flow --yes --forms-json PATH PLAN.json
+```
+
+- `--forms-json` prints response forms as JSON instead of main text.
+- Unchecked radios expose wire values under each control's `options` array
+  (for example `"value": "1"`); the control's top-level `value` stays null
+  until selected.
+- For 〇/× items, the first radio is commonly 〇=`1` and the second ×=`2`, but
+  always verify against the rendered option order in page text.
+
+### Multi-step quizzes and drills
+
+Prefer one `flow` from the original quiz/drill path so cookies, hidden
+controls, intermediate bodies, and changed form actions carry forward. Do not
+split an attempt into unrelated `submit` calls, invent `qid*` names, or inspect
+the session cookie.
+
+Flow plan steps may include:
+
+- `"button": "NAME"` — submit control to press
+- `"fields": { "qid1": "2", ... }` — explicit answers
+- `"auto": "first-choice"` — fill first radio/select option per field, then
+  apply explicit `fields` on top. Use only when exact answers are not required
+  (optional noise clearance, exploratory runs).
+- `"form": N` — only when button disambiguation is insufficient
+
+#### Observed sequences (verify per target)
+
+**Single-page quiz (descriptive answer):**
+
+1. `action_QueryStudent_querystart`
+2. fields such as `qid1` + `action_QueryStudent_queryshow_confirm`
+3. `action_QueryStudent_querydone`
+
+**INFOSS-style drill (all questions on one page):**
+
+1. `action_DrillStudent_querystart`
+2. `qid*` answers + `action_DrillStudent_next_queryshow`
+3. `action_DrillStudent_querydone`
+
+**Multi-page quiz (page buttons `p1`…`pN`):**
+
+1. `action_QueryStudent_querystart`
+2. Jump or advance with
+   `action_QueryStudent_queryshow_pK` / `_next` / `_prev` while posting that
+   page's `qid*` fields
+3. `action_QueryStudent_queryshow_confirm` with the last page's fields
+4. `action_QueryStudent_querydone`
+
+Collect every page's questions before final submit when correctness matters:
+partial flows that answer with `"auto": "first-choice"` and jump pages are fine
+for discovery; do not treat those exploratory answers as the real submission
+unless the user accepted low-stakes completion.
+
+Checkbox-only checklists (for example INFOSS theft-prevention check) need
+explicit `qidN=1` (or the value shown in `options`) for each required box;
+`"auto": "first-choice"` does not reliably check every box.
+
+### Post-submission verification
+
+After any quiz, drill, or report mutation intended to complete work:
+
+1. `get PATH` (or the report/quiz page) and require the expected state text
+   such as `提出済み`, `合格済み`, or a numeric score when published.
+2. `tasks --json` and confirm the item is gone when clearing outstanding work
+   was the goal (optional items may remain until completed or left alone).
+3. For drills with a pass threshold, require a passing best score, not merely
+   that an attempt exists.
+4. For reports, confirm both the report page state and, when useful,
+   `submissions`.
+5. Record durable outcomes in Kyre's `self` life records when the surrounding
+   agent workflow expects it; do not print secrets or session cookies.
+
+If verification fails, report the exact page state. Do not re-submit blindly.
 
 ## Handle failures
 
 - On an argument error, inspect only the relevant `COMMAND --help=plain` and
   retry after correcting the invocation.
-- On an authentication error, stop and request a fresh login.
+- On an authentication error, stop and request a fresh login via the managed
+  university login path above.
 - On a parser or unexpected-page error, report the affected command and page;
   do not improvise a write through another form.
+- On off-origin / SharePoint video errors, explain that media hosts are outside
+  manaba-cli and fall back to downloadable notes when available.
 - Never read or print the cookie jar while debugging.
