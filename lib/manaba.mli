@@ -32,6 +32,14 @@ val submit_index :
   unit ->
   Http_client.response outcome
 
+val submit_named :
+  t ->
+  target:string ->
+  button_name:string ->
+  fields:(string * string) list ->
+  uploads:Http_client.upload list ->
+  Http_client.response outcome
+
 val memo_set : t -> class_:int -> text:string -> Http_client.response outcome
 
 val thread_create :

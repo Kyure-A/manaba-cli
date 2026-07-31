@@ -276,6 +276,7 @@ let test_flow_plan () =
         {
           "form": 2,
           "button": "action_next",
+          "auto": "first-choice",
           "fields": {"choice": ["a", "b"], "comment": "hello"},
           "files": {"Upload": "answer.txt"}
         }
@@ -290,6 +291,11 @@ let test_flow_plan () =
         "fields"
         [ ("choice", "a"); ("choice", "b"); ("comment", "hello") ]
         step.fields;
+      Alcotest.(check bool)
+        "auto first-choice" true
+        (match step.auto with
+        | Some Flow_plan.First_choice -> true
+        | _ -> false);
       match step.uploads with
       | [ upload ] ->
           Alcotest.(check string)
@@ -620,12 +626,14 @@ let test_report_round_trip () =
                 button_name = Some "action_next";
                 fields = [ ("choice", "a&b"); ("choice", "second") ];
                 uploads = [];
+                auto = None;
               };
               {
                 form_index = Some 1;
                 button_name = None;
                 fields = [];
                 uploads = [];
+                auto = None;
               };
             ]
           in

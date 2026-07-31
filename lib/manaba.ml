@@ -201,9 +201,14 @@ let run_flow client ~target (steps : Flow_plan.t) =
               (Error (Form_error (Printf.sprintf "ステップ %d: %s" index message)))
         | Error error -> Lwt.return (Error error)
         | Ok form -> (
-            submit_form client ~source_response:response ~form
-              ~fields:step.fields ~uploads:step.uploads
-              ?button_name:step.button_name ()
+            let fields =
+              match step.auto with
+              | Some Flow_plan.First_choice ->
+                  add_fields (Html.first_choice_fields form) step.fields
+              | None -> step.fields
+            in
+            submit_form client ~source_response:response ~form ~fields
+              ~uploads:step.uploads ?button_name:step.button_name ()
             >>= function
             | Error (Form_error message) ->
                 Lwt.return

@@ -93,7 +93,21 @@ manaba submit 'course_123_topics?action=newthread' --form 1 \
 
 `forms` hides token values. `submit` carries hidden fields forward automatically;
 use `--file NAME=PATH` for uploads and `--button NAME` when a form has multiple
-submit buttons. Use `flow PATH PLAN.json` for multi-page confirmation flows.
+submit buttons. When `--button` is set, the form is selected by that button name
+(useful when form 1 is a Google Calendar widget). Use `flow PATH PLAN.json` for
+multi-page confirmation flows.
+
+For multi-step quizzes/drills whose answer form appears only after `スタート`:
+
+```console
+manaba submit --yes --forms-json --button action_DrillStudent_querystart \
+  'course_123_drill_456'
+manaba flow --yes 'course_123_drill_456' plan.json
+```
+
+Flow plan steps may include `"auto": "first-choice"` to pick the first
+radio/select option, and `--forms-json` on `submit`/`flow` prints the response
+forms as JSON instead of page text.
 
 Mutating commands ask for confirmation unless `--yes` is supplied.
 

@@ -120,30 +120,42 @@ Use `submit` or `flow` only when no dedicated command exists and the requested
 mutation is explicit. Let the CLI carry hidden fields forward; never attempt to
 extract or reveal hidden token values.
 
-### Handle multi-step quizzes
+When `--button NAME` is passed to `submit`, the CLI selects the form that
+contains that button. Do not assume form index 1 is the assignment form; many
+course pages put a Google Calendar widget first.
 
-Treat a quiz that exposes only `スタート` on `GET` as a multi-step form. The
-answer form may exist only in the response to that start `POST`; running `get`
-or `forms --json` against the original quiz path afterward can return the
+### Handle multi-step quizzes and drills
+
+Treat a quiz/drill that exposes only `スタート` on `GET` as a multi-step form.
+The answer form may exist only in the response to that start `POST`; running
+`get` or `forms --json` against the original path afterward can return the
 start page again. This is an inspection limitation, not evidence that the
 question or saved attempt disappeared.
 
-- Prefer one `flow` from the original quiz path so cookies, hidden controls,
-  intermediate response bodies, and changed form actions carry forward.
+- Prefer one `flow` from the original quiz/drill path so cookies, hidden
+  controls, intermediate response bodies, and changed form actions carry
+  forward.
 - Do not split the attempt into unrelated `submit` calls, guess `qid*` names or
   button names, or inspect the session cookie.
-- Remember that `submit` currently prints only main text and does not expose the
-  response URL or its form structure. If the next form is unknown, add or use a
-  structured post-response inspection path before the final submission rather
-  than replaying mutations blindly.
-- A common current sequence is
+- To inspect the post-start answer form without guessing, use
+  `submit --yes --forms-json --button START_BUTTON PATH` or
+  `flow --yes --forms-json PATH PLAN.json`. `--forms-json` prints the response
+  forms as JSON instead of main text. Unchecked radios expose their wire
+  values under each control's `options` array.
+- Flow steps may set `"auto": "first-choice"` to pick the first radio/select
+  option for each unanswered field before applying explicit `fields`. Use this
+  only when exact answers are not required.
+- Observed quiz sequence (verify per target):
   `action_QueryStudent_querystart` → answer field such as `qid1` plus
   `action_QueryStudent_queryshow_confirm` → `action_QueryStudent_querydone`.
-  Treat these names as observed examples and verify them for the target quiz.
+- Observed drill sequence (INFOSS-style, verify per target):
+  `action_DrillStudent_querystart` → `qid*` answers plus
+  `action_DrillStudent_next_queryshow` → `action_DrillStudent_querydone`.
 - Before the final step, verify that the confirmation response contains the
-  complete answer and satisfies any length requirement. After submission, run
-  `get QUIZ_PATH` and `submissions`; require both the quiz state `提出済み` and
-  a matching submission-history row.
+  complete answer and satisfies any length or pass-score requirement. After
+  submission, run `get PATH` and `tasks --json`; require the target state
+  (`提出済み` / `合格済み`) and that it no longer appears as an open task when
+  that was the goal.
 
 ## Handle failures
 
