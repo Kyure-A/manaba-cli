@@ -152,6 +152,41 @@ report cancel COURSE_ID REPORT_ID
 thread create COURSE_ID SUBJECT BODY
 ```
 
+### Submit reports with multiple individual files
+
+Do not archive or combine files merely because `report submit` accepts one
+`FILE`. That command uploads one file and immediately confirms submission. For
+an assignment requiring several separate files, use the report page's generic
+form instead:
+
+1. Resolve the report path as `course_COURSE_ID_report_REPORT_ID` and inspect it
+   with `forms --json PATH`.
+2. For each file, press the upload button separately while leaving the report
+   uncommitted:
+
+   ```text
+   submit --yes --button=action_ReportStudent_submitdone \
+     --file=RptSubmitFile=/absolute/path/to/file.docx PATH
+   ```
+
+3. After every upload, require the response to show the cumulative file count
+   and exact names. The file control's `multiple: false` means one file per
+   upload request, not one file per report.
+4. Only after every required file is present, confirm once:
+
+   ```text
+   submit --yes --button=action_ReportStudent_commitdone PATH
+   ```
+
+5. Verify `提出済み`, the expected total count, and every submitted filename
+   with `get PATH`; check `submissions` when useful.
+
+If a partial report was already confirmed and the page allows resubmission,
+`report cancel --yes COURSE_ID REPORT_ID` returns it to the editable state and
+normally preserves uploaded files. Inspect the returned page and forms before
+adding the rest, then confirm once again. Never assume preservation or retry a
+mutation blindly.
+
 For an unsupported action, inspect the page with `forms --json PATH` first.
 Use `submit` or `flow` only when no dedicated command exists and the requested
 mutation is explicit. Let the CLI carry hidden fields forward; never attempt to
