@@ -231,6 +231,18 @@ controls, intermediate bodies, and changed form actions carry forward. Do not
 split an attempt into unrelated `submit` calls, invent `qid*` names, or inspect
 the session cookie.
 
+Exception — when the answer has to be written between entering the quiz and
+submitting it. `flow` restarts its plan from a fresh fetch, so its first step
+presses `スタート` again; manaba reissues that screen's hidden tokens on every
+entry and restarts 経過時間 from it, so an enter-and-submit run records only its
+own seconds. Chain `submit --save-state FILE` / `submit --from-state FILE`
+instead: enter once, do the reading and drafting, then submit against the saved
+response. The quiz is never re-entered and 経過時間 covers the actual work.
+State files hold the page's hidden tokens, are written 0600, and are single-use
+because submitting invalidates those tokens. Never pad the interval with idle
+waiting to make 経過時間 look larger — that fabricates engagement telemetry;
+only real work belongs in that window.
+
 Flow plan steps may include:
 
 - `"button": "NAME"` — submit control to press

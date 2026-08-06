@@ -647,6 +647,164 @@ let test_report_round_trip () =
   in
   Lwt_main.run run
 
+(* manaba reissues a screen's hidden tokens on every entry and restarts a
+   quiz's 経過時間 from that entry. Pressing スタート again to reach the answer
+   form therefore throws away the time actually spent on the quiz, so the
+   answer has to be submitted against the response already in hand. *)
+let test_form_state_resumes_without_reentry () =
+  let open Lwt.Infix in
+  let start_page =
+    {|
+    <div class="contentbody-l">start</div>
+    <form action="/ct/quiz" method="post">
+      <input type="hidden" name="manaba-form" value="1">
+      <input type="submit" name="action_start" value="スタート">
+    </form>
+    |}
+  in
+  let answer_page token =
+    Printf.sprintf
+      {|
+    <div class="contentbody-l">answer</div>
+    <form action="/ct/quiz" method="post">
+      <input type="hidden" name="token" value="%s">
+      <input type="submit" name="action_confirm" value="提出確認">
+      <textarea name="qid1"></textarea>
+    </form>
+    |}
+      token
+  in
+  let confirm_page token =
+    Printf.sprintf
+      {|
+    <div class="contentbody-l">confirm</div>
+    <form action="/ct/quiz" method="post">
+      <input type="hidden" name="token" value="%s">
+      <input type="submit" name="action_done" value="提出">
+    </form>
+    |}
+      token
+  in
+  let entries = ref 0 in
+  let submitted_token = ref None in
+  let token_of body =
+    try
+      ignore (Str.search_forward (Str.regexp "token=\\([^&]*\\)") body 0);
+      Some (Str.matched_group 1 body)
+    with Not_found -> None
+  in
+  let run =
+    let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Lwt_unix.setsockopt socket Unix.SO_REUSEADDR true;
+    Lwt_unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0))
+    >>= fun () ->
+    Lwt_unix.listen socket 10;
+    let port =
+      match Lwt_unix.getsockname socket with
+      | Unix.ADDR_INET (_, port) -> port
+      | _ -> Alcotest.fail "expected TCP socket"
+    in
+    let stop, stop_wakener = Lwt.wait () in
+    let callback _connection request body =
+      Cohttp_lwt.Body.to_string body >>= fun request_body ->
+      let method_ = Cohttp.Request.meth request in
+      let path = Cohttp.Request.uri request |> Uri.path in
+      match (method_, path) with
+      | `GET, "/ct/quiz" ->
+          Cohttp_lwt_unix.Server.respond_string ~status:`OK ~body:start_page ()
+      | `POST, "/ct/quiz"
+        when Util.contains ~needle:"action_start=" request_body ->
+          incr entries;
+          Cohttp_lwt_unix.Server.respond_string ~status:`OK
+            ~body:(answer_page (Printf.sprintf "t%d" !entries))
+            ()
+      | `POST, "/ct/quiz"
+        when Util.contains ~needle:"action_confirm=" request_body ->
+          Alcotest.(check bool)
+            "answer reached the confirm screen" true
+            (Util.contains ~needle:"qid1=answer" request_body);
+          Cohttp_lwt_unix.Server.respond_string ~status:`OK
+            ~body:
+              (confirm_page (Option.value (token_of request_body) ~default:""))
+            ()
+      | `POST, "/ct/quiz" when Util.contains ~needle:"action_done=" request_body
+        ->
+          submitted_token := token_of request_body;
+          Cohttp_lwt_unix.Server.respond_string ~status:`OK
+            ~body:{|<div class="contentbody-l">done</div>|} ()
+      | _ ->
+          Cohttp_lwt_unix.Server.respond_string ~status:`Not_found
+            ~body:("unexpected request: " ^ path)
+            ()
+    in
+    let server =
+      Cohttp_lwt_unix.Server.create ~stop
+        ~mode:(`TCP (`Socket socket))
+        (Cohttp_lwt_unix.Server.make ~callback ())
+    in
+    Lwt.async (fun () -> server);
+    Lwt.pause () >>= fun () ->
+    let session = Filename.temp_file "manaba-session" ".json" in
+    Sys.remove session;
+    let state_path = Filename.temp_file "manaba-state" ".json" in
+    let client =
+      Manaba.create
+        (Printf.sprintf "http://127.0.0.1:%d/ct/" port)
+        (Some session)
+    in
+    (* Entering the quiz starts the clock. *)
+    Manaba.submit_named client ~target:"quiz" ~button_name:"action_start"
+      ~fields:[] ~uploads:[]
+    >>= function
+    | Error problem -> Alcotest.fail (Manaba.error_to_string problem)
+    | Ok entered -> (
+        Alcotest.(check int) "entered once" 1 !entries;
+        (match Form_state.save state_path (Form_state.of_response entered) with
+        | Ok () -> ()
+        | Error problem -> Alcotest.fail (Form_state.error_to_string problem));
+        Alcotest.(check int)
+          "state file is private" 0o600
+          ((Unix.stat state_path).Unix.st_perm land 0o777);
+        let resumed =
+          match Form_state.load state_path with
+          | Ok state -> Form_state.to_response state
+          | Error problem -> Alcotest.fail (Form_state.error_to_string problem)
+        in
+        (* The work happens here in real use; the point is that resuming from the
+           saved response neither re-fetches nor re-enters the quiz. *)
+        ( Manaba.submit_response_named client ~source_response:resumed
+            ~button_name:"action_confirm"
+            ~fields:[ ("qid1", "answer") ]
+            ~uploads:[]
+        >>= function
+          | Error problem -> Alcotest.fail (Manaba.error_to_string problem)
+          | Ok confirmation ->
+              Alcotest.(check int) "no re-entry to confirm" 1 !entries;
+              Manaba.submit_response_named client ~source_response:confirmation
+                ~button_name:"action_done" ~fields:[] ~uploads:[] )
+        >>= function
+        | Error problem -> Alcotest.fail (Manaba.error_to_string problem)
+        | Ok _ ->
+            Alcotest.(check int) "no re-entry overall" 1 !entries;
+            Alcotest.(check (option string))
+              "submitted under the first entry's token" (Some "t1")
+              !submitted_token;
+            Lwt.wakeup_later stop_wakener ();
+            Lwt.return_unit)
+  in
+  Lwt_main.run run
+
+let test_form_state_rejects_unknown_schema () =
+  let json = `Assoc [ ("schemaVersion", `Int 2); ("uri", `String "x") ] in
+  match Form_state.of_yojson json with
+  | Error (Form_state.Invalid message) ->
+      Alcotest.(check bool)
+        "names the version" true
+        (Util.contains ~needle:"schemaVersion 2" message)
+  | Error problem ->
+      Alcotest.failf "unexpected error: %s" (Form_state.error_to_string problem)
+  | Ok _ -> Alcotest.fail "accepted an unsupported schema version"
+
 let () =
   Alcotest.run "manaba-cli"
     [
@@ -681,5 +839,12 @@ let () =
           Alcotest.test_case "submission state" `Quick test_report_state;
           Alcotest.test_case "auth, upload, commit, cancel" `Quick
             test_report_round_trip;
+        ] );
+      ( "form state",
+        [
+          Alcotest.test_case "resumes without re-entry" `Quick
+            test_form_state_resumes_without_reentry;
+          Alcotest.test_case "rejects unknown schema" `Quick
+            test_form_state_rejects_unknown_schema;
         ] );
     ]

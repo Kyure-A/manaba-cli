@@ -40,6 +40,29 @@ val submit_named :
   uploads:Http_client.upload list ->
   Http_client.response outcome
 
+(** [submit_response_index] and [submit_response_named] submit a form found in
+    an already-held response instead of fetching the page again. manaba mints
+    fresh hidden tokens on every fetch and resets screen-local state such as a
+    quiz's 経過時間, so re-fetching is not a neutral operation. *)
+
+val submit_response_index :
+  t ->
+  source_response:Http_client.response ->
+  index:int ->
+  fields:(string * string) list ->
+  uploads:Http_client.upload list ->
+  ?button_name:string ->
+  unit ->
+  Http_client.response outcome
+
+val submit_response_named :
+  t ->
+  source_response:Http_client.response ->
+  button_name:string ->
+  fields:(string * string) list ->
+  uploads:Http_client.upload list ->
+  Http_client.response outcome
+
 val memo_set : t -> class_:int -> text:string -> Http_client.response outcome
 
 val thread_create :

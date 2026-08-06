@@ -314,26 +314,66 @@ let print_response_body ~forms_json body =
   if forms_json then Output.print_forms ~json:true (Html.forms body)
   else print_endline (Html.main_text body)
 
-let form_submit target index fields files button yes forms_json client =
-  let description =
-    match button with
-    | Some name -> Printf.sprintf "%s の送信ボタン %s を押します。" target name
-    | None -> Printf.sprintf "%s のフォーム %d を送信します。" target index
+let form_submit target from_state save_state index fields files button yes
+    forms_json client =
+  let source =
+    match (target, from_state) with
+    | Some target, None -> Ok (`Target target)
+    | None, Some path -> (
+        match Form_state.load path with
+        | Ok state -> Ok (`State state)
+        | Error problem -> Error (Form_state.error_to_string problem))
+    | Some _, Some _ -> Error "PATH と --from-state は同時に指定できません。どちらか一方にしてください。"
+    | None, None -> Error "PATH か --from-state のどちらかを指定してください。"
   in
-  if not (confirm yes description) then `Error (false, "送信を中止しました。")
-  else
-    let uploads =
-      List.map (fun (field, path) -> Http_client.{ field; path }) files
-    in
-    let promise =
-      match button with
-      | Some button_name ->
+  match source with
+  | Error message -> `Error (false, message)
+  | Ok source ->
+      let origin =
+        match source with
+        | `Target target -> target
+        | `State state -> Uri.to_string state.Form_state.uri
+      in
+      let description =
+        match button with
+        | Some name -> Printf.sprintf "%s の送信ボタン %s を押します。" origin name
+        | None -> Printf.sprintf "%s のフォーム %d を送信します。" origin index
+      in
+      if not (confirm yes description) then `Error (false, "送信を中止しました。")
+      else
+        let uploads =
+          List.map (fun (field, path) -> Http_client.{ field; path }) files
+        in
+        let promise =
+          match (source, button) with
           (* Prefer button lookup: manaba pages often put Google Calendar as form 1. *)
-          Manaba.submit_named client ~target ~button_name ~fields ~uploads
-      | None -> Manaba.submit_index client ~target ~index ~fields ~uploads ()
-    in
-    lwt_result promise (fun response ->
-        print_response_body ~forms_json response.Http_client.body)
+          | `Target target, Some button_name ->
+              Manaba.submit_named client ~target ~button_name ~fields ~uploads
+          | `Target target, None ->
+              Manaba.submit_index client ~target ~index ~fields ~uploads ()
+          | `State state, Some button_name ->
+              Manaba.submit_response_named client
+                ~source_response:(Form_state.to_response state)
+                ~button_name ~fields ~uploads
+          | `State state, None ->
+              Manaba.submit_response_index client
+                ~source_response:(Form_state.to_response state)
+                ~index ~fields ~uploads ()
+        in
+        lwt_result promise (fun response ->
+            (match save_state with
+            | None -> ()
+            | Some path -> (
+                match
+                  Form_state.save path (Form_state.of_response response)
+                with
+                | Ok () -> ()
+                | Error problem ->
+                    (* The submission already went through, so this is a warning,
+                       not a failure. *)
+                    Printf.eprintf "警告: 応答を %s に保存できませんでした: %s\n%!" path
+                      (Form_state.error_to_string problem)));
+            print_response_body ~forms_json response.Http_client.body)
 
 let form_submit_cmd =
   let index =
@@ -356,12 +396,32 @@ let form_submit_cmd =
       & info [ "button" ] ~docv:"NAME" ~doc:"押す submit ボタンの name。")
   in
   let yes = Arg.(value & flag & info [ "yes"; "y" ] ~doc:"確認なしで送信します。") in
+  let optional_target =
+    Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
+  in
+  let from_state =
+    Arg.(
+      value
+      & opt (some string) None
+      & info [ "from-state" ] ~docv:"FILE"
+          ~doc:
+            "PATH を取得し直す代わりに、--save-state \
+             で保存した応答からフォームを送信します。ページを再取得しないため、小テストの「スタート」を押し直さずに続きを送信できます。PATH \
+             とは併用できません。")
+  in
+  let save_state =
+    Arg.(
+      value
+      & opt (some string) None
+      & info [ "save-state" ] ~docv:"FILE"
+          ~doc:"送信後の応答を FILE に保存します（0600）。次の送信で --from-state に渡すと、その画面から続けられます。")
+  in
   Cmd.v
     (command_info "submit" "manaba のフォームを 1 ステップ送信します。")
     Term.(
       ret
-        (const form_submit $ target $ index $ fields $ files $ button $ yes
-       $ forms_json_flag $ client))
+        (const form_submit $ optional_target $ from_state $ save_state $ index
+       $ fields $ files $ button $ yes $ forms_json_flag $ client))
 
 let yes_flag = Arg.(value & flag & info [ "yes"; "y" ] ~doc:"確認なしで実行します。")
 

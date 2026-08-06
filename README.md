@@ -109,6 +109,29 @@ Flow plan steps may include `"auto": "first-choice"` to pick the first
 radio/select option, and `--forms-json` on `submit`/`flow` prints the response
 forms as JSON instead of page text.
 
+`flow` re-runs its whole plan from a fresh fetch, so its first step presses
+`スタート` again. manaba mints new hidden tokens on every entry and restarts the
+quiz's 経過時間 from that entry, so a plan that enters and submits in one run
+records only the seconds the run itself took. To spend real time on a quiz
+between entering it and submitting, save the response and resume from it:
+
+```console
+manaba submit --yes --button action_QueryStudent_querystart \
+  --save-state /tmp/quiz.json 'course_123_query_456'
+# read the material and write the answer here; the clock is running
+manaba submit --yes --from-state /tmp/quiz.json --form 1 \
+  --button action_QueryStudent_queryshow_confirm --field "qid1=$(cat answer.txt)" \
+  --save-state /tmp/quiz-confirm.json
+manaba submit --yes --from-state /tmp/quiz-confirm.json --form 1 \
+  --button action_QueryStudent_querydone
+```
+
+`--from-state` submits the form held in the saved response instead of fetching
+`PATH` again, so the quiz is never re-entered and the recorded 経過時間 covers
+the work. `PATH` and `--from-state` are mutually exclusive. State files are
+written with mode 0600 because the saved page carries its hidden form tokens;
+they are single-use, since submitting invalidates those tokens.
+
 Mutating commands ask for confirmation unless `--yes` is supplied.
 
 ## Security and limitations

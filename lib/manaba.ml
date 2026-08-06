@@ -221,30 +221,38 @@ let run_flow client ~target (steps : Flow_plan.t) =
   | Error error -> Lwt.return (Error error)
   | Ok response -> run 1 response steps
 
+let submit_response_index client ~source_response ~index ~fields ~uploads
+    ?button_name () =
+  match select_form (Html.forms source_response.Http_client.body) index with
+  | Error error -> Lwt.return (Error error)
+  | Ok form ->
+      submit_form client ~source_response ~form ~fields ~uploads ?button_name ()
+
+let submit_response_named client ~source_response ~button_name ~fields ~uploads
+    =
+  match
+    Html.forms source_response.Http_client.body
+    |> Html.find_form_by_control button_name
+  with
+  | None ->
+      Lwt.return
+        (Error (Form_error (Printf.sprintf "送信ボタン %s が見つかりません。" button_name)))
+  | Some form ->
+      submit_form client ~source_response ~form ~fields ~uploads ~button_name ()
+
 let submit_index client ~target ~index ~fields ~uploads ?button_name () =
   get client target >>= function
   | Error error -> Lwt.return (Error error)
-  | Ok source_response -> (
-      match select_form (Html.forms source_response.body) index with
-      | Error error -> Lwt.return (Error error)
-      | Ok form ->
-          submit_form client ~source_response ~form ~fields ~uploads
-            ?button_name ())
+  | Ok source_response ->
+      submit_response_index client ~source_response ~index ~fields ~uploads
+        ?button_name ()
 
 let submit_named client ~target ~button_name ~fields ~uploads =
   get client target >>= function
   | Error error -> Lwt.return (Error error)
-  | Ok source_response -> (
-      match
-        Html.forms source_response.body |> Html.find_form_by_control button_name
-      with
-      | None ->
-          Lwt.return
-            (Error
-               (Form_error (Printf.sprintf "送信ボタン %s が見つかりません。" button_name)))
-      | Some form ->
-          submit_form client ~source_response ~form ~fields ~uploads
-            ~button_name ())
+  | Ok source_response ->
+      submit_response_named client ~source_response ~button_name ~fields
+        ~uploads
 
 let find_link_by_prefix response prefix =
   Html.links response.Http_client.body
