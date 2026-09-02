@@ -1,53 +1,57 @@
 ---
 name: manaba
-description: Operate Kyre's University of Tsukuba manaba account through the canonical GitHub Nix flake. Use whenever a request mentions manaba, courses, pending assignments, reports, quizzes, surveys, submissions, grades, course news or content, attachments, reminders, portfolio, registration, bulletin-board posts, memos, profile settings, favorites, or asks to submit, cancel, download, post, enroll, or change anything in manaba. Resolve human names to CLI IDs, prefer structured reads, and handle account mutations safely.
+description: Operate a University of Tsukuba manaba account through the manaba-cli Nix flake. Use whenever a request mentions manaba, courses, pending assignments, reports, quizzes, drills, surveys, submissions, grades, course news or content, attachments, reminders, portfolio, registration, bulletin-board posts, memos, profile settings, favorites, or asks to submit, cancel, download, post, enroll, or change anything in manaba. Resolve human names to CLI IDs, prefer structured reads, and handle account mutations safely.
 ---
 
 # manaba
 
-Use the canonical GitHub flake of `manaba` as the execution layer. Begin with
-the requested operation instead of rereading the repository or README.
+Use `manaba-cli` as the execution layer. Begin with the requested operation
+instead of rereading the repository or README.
 
-## Use only the canonical GitHub flake
+## Resolve the CLI
 
-Prefix every direct command with:
-`nix run github:Kyure-A/manaba-cli --`
+Run every command as:
 
-- Never run the PATH/global `manaba`, probe it with `command -v`, or use a local
-  checkout or local flake. Kyre's installed binary is a known legacy CLI with
-  an incompatible interface.
-- Require both Nix and resolution of `github:Kyure-A/manaba-cli`. If Nix is
-  unavailable or the GitHub flake cannot be resolved, report that exact blocker
-  instead of substituting another binary or checkout.
-- Treat the GitHub flake's `COMMAND --help=plain` output as the source of truth
-  for exact arguments. Consult source files only when the help is insufficient.
+```console
+nix run github:Kyure-A/manaba-cli -- COMMAND ...
+```
+
+Command examples below are the arguments after the runner's `--`. A `manaba`
+binary already on `PATH` (for example from `nix profile install` or a build of
+this repository) is an acceptable substitute only when `manaba --version`
+matches the flake. If Nix is unavailable and no matching binary exists, report
+that blocker instead of guessing at another tool.
+
+Treat `COMMAND --help=plain` as the source of truth for exact arguments. Consult
+source files only when the help is insufficient.
 
 Do not change `--base-url` unless the user explicitly requests another manaba
 instance or a test server. Preserve `MANABA_SESSION` when it is already set.
 
 ## Authenticate
 
-Run canonical `auth status` once before the first authenticated operation in a
-task. If the session is logged out, expired, or an authenticated request reports
-that login is required, recover it through Kyre's existing Bitwarden Secrets
-Manager adapter:
+Run `auth status` once before the first authenticated operation in a task. If
+the session is logged out, expired, or an authenticated request reports that
+login is required, obtain a fresh session with `auth login`:
 
-```sh
-cd /Users/kyre/ghq/github.com/Kyure-A/self
-nix develop -c npm run self -- secrets exec -- \
-  npm run self -- university login
-```
+- Interactive terminal: `auth login -u UNIFIED_AUTH_ID` prompts for the
+  password on a hidden prompt.
+- Non-interactive: pipe the password from a secret store into
+  `auth login -u UNIFIED_AUTH_ID --password-stdin`. On macOS
+  `--password-clipboard` reads it from the clipboard.
+- Use a different session file only when the user asks, via `--session FILE`
+  or `MANABA_SESSION`.
 
-Then verify canonical `auth status` and resume the original request.
+Then verify `auth status` and resume the original request.
 
-- Never ask Kyre to log in manually or re-provide credentials while this
-  recovery path is available.
-- Never request or display a password, inspect the session file, print secret
-  environment variables, or put credentials directly in shell arguments.
-- If recovery fails, report the exact failing layer only after the managed path
-  has actually been attempted. Do not replace it with an interactive login.
-- The CLI stores only session cookies, normally under
+- Never request, accept, echo, or store a password in chat, and never put one
+  in a shell argument. Let the user's secret store or hidden prompt supply it.
+- Never inspect, print, or copy the session cookie file. The CLI stores only
+  session cookies, with mode `0600`, under `$XDG_CONFIG_HOME/manaba-cli/` or
   `~/.config/manaba-cli/session.json`.
+- If login fails, report the exact failing layer (Nix, network, unified
+  authentication, manaba). Do not fall back to browser automation unless the
+  user asks for that expansion.
 
 ## Read data
 
@@ -296,8 +300,9 @@ After any quiz, drill, or report mutation intended to complete work:
    that an attempt exists.
 4. For reports, confirm both the report page state and, when useful,
    `submissions`.
-5. Record durable outcomes in Kyre's `self` life records when the surrounding
-   agent workflow expects it; do not print secrets or session cookies.
+5. Report the verified state to the user. Where to record the outcome
+   durably is the surrounding agent workflow's decision, not this skill's;
+   never write secrets or session cookies anywhere.
 
 If verification fails, report the exact page state. Do not re-submit blindly.
 
@@ -305,10 +310,11 @@ If verification fails, report the exact page state. Do not re-submit blindly.
 
 - On an argument error, inspect only the relevant `COMMAND --help=plain` and
   retry after correcting the invocation.
-- On an authentication error, stop and request a fresh login via the managed
-  university login path above.
+- On an authentication error, stop and obtain a fresh session via `auth login`
+  as described above.
 - On a parser or unexpected-page error, report the affected command and page;
-  do not improvise a write through another form.
+  do not improvise a write through another form. If manaba's markup changed,
+  report that the CLI may need an update.
 - On off-origin / SharePoint video errors, explain that media hosts are outside
   manaba-cli and fall back to downloadable notes when available.
 - Never read or print the cookie jar while debugging.
