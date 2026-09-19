@@ -86,6 +86,7 @@ val registration_search :
 
 val registration_key : t -> string -> Http_client.response outcome
 val report_is_submitted : string -> bool
+val report_is_editable : string -> bool
 
 type report_submission = {
   assignment : Assignment.t;

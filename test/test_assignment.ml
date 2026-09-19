@@ -65,6 +65,13 @@ let test_unknown () =
   Alcotest.(check bool)
     "instructions aren't receipts" false
     (Assignment.is_submitted item);
+  Alcotest.(check bool)
+    "unknown markup isn't cancellation success" false
+    (Manaba.report_is_editable "<p>Unexpected page</p>");
+  Alcotest.(check bool)
+    "editing requires explicit evidence" true
+    (Manaba.report_is_editable
+       {|<form><input type="file" name="RptSubmitFile"><input type="submit" name="action_ReportStudent_submitdone"></form>|});
   Alcotest.(check int)
     "attachments aren't submitted files" 0
     (List.length item.submitted_files);

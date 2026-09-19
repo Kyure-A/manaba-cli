@@ -349,6 +349,16 @@ let report_target course_id report_id =
 let report_is_submitted html =
   Assignment.parse ~path:"course_0_report_0" html |> Assignment.is_submitted
 
+let report_is_editable html =
+  let assignment = Assignment.parse ~path:"course_0_report_0" html in
+  (not (Assignment.is_submitted assignment))
+  && ((match assignment.status with Some ("未提出" | "受付中") -> true | _ -> false)
+     || List.exists
+          (fun form ->
+            Html.file_controls form <> []
+            && Html.contains_control "action_ReportStudent_submitdone" form)
+          assignment.forms)
+
 type report_submission = {
   assignment : Assignment.t;
   expected_files : string list;
@@ -513,11 +523,13 @@ let report_cancel client ~course_id ~report_id =
           | Error error -> Lwt.return (Error error)
           | Ok _ -> (
               get client target >|= function
-              | Ok verification when not (report_is_submitted verification.body)
-                ->
+              | Ok verification
+                when Filename.basename (Uri.path verification.uri) = target
+                     && report_is_editable verification.body ->
                   Ok verification
               | Ok _ ->
-                  Error (Form_error "取消送信後も提出済み状態のままです。manaba の画面を確認してください。")
+                  Error
+                    (Form_error "取消送信後の再取得で未提出・編集可能な状態を確認できません。自動再送信しないでください。")
               | Error error -> Error error))
       | _ ->
           Lwt.return (Error (Form_error "提出取消ボタンが見つかりません。現在は未提出か、取消不可の課題です。")))
