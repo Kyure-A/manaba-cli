@@ -1,3 +1,9 @@
 (test
  (name test_main)
+ (modules test_main)
+ (libraries manaba_cli.lib alcotest))
+
+(test
+ (name test_assignment)
+ (modules test_assignment)
  (libraries manaba_cli.lib alcotest))

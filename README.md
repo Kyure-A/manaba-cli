@@ -73,6 +73,47 @@ List commands support `--json`. Other browser features are available through:
 
 Run `manaba COMMAND --help` for arguments and options.
 
+### Structured assignment and submission details
+
+```console
+manaba quiz show COURSE_ID QUIZ_ID --json
+manaba drill show COURSE_ID DRILL_ID --json
+manaba survey show COURSE_ID SURVEY_ID --json
+manaba report show COURSE_ID REPORT_ID --json
+manaba assignment 'course_123_query_456' --json
+manaba assignment --from-state /tmp/quiz.json --json
+```
+
+The shared view includes `kind`, IDs, `title`, `deadline`, `resubmission`,
+`status`, `submitted_at`, `answer_count`, `file_count`, `submitted_files`,
+`questions`, `facts`, public `forms`, and `warnings`. Metadata comes from
+recognized labels in two-column table rows or definition lists. Unknown or
+conflicting values are `null`; a missing file/answer count is never assumed to
+be zero. Dates remain the server's original text, without a guessed timezone.
+`facts` retains observed label/value pairs for diagnosing unsupported labels.
+
+Question groups use the observed `qidN` control names. Prompts and option labels
+are included when semantic labels or fieldset legends identify them; unobserved
+prompts stay `null`. Hidden/password control values are redacted. A page may
+contain only some questions, or only a start button. These commands do not start
+an attempt or claim all questions have been collected. `assignment --from-state`
+reads a saved post-start response without network requests or consuming it.
+
+`report submit --json COURSE_ID REPORT_ID FILE` verifies the requested basename
+on the upload preview, confirms once, then independently fetches the report.
+Success requires a submitted status and the exact preview file-name set; file
+counts must agree whenever displayed. An unchanged observed submission time or
+an indistinguishable earlier same-name submission is rejected. The result's
+`verification` is `fresh_status_and_files_match`, with `expected_files`, nullable
+`timestamp_changed`, and the structured `assignment`. Missing server timestamps
+and counts remain explicitly flagged; this does not verify file bytes or prove
+a unique receipt ID. A failure after upload/commit may have changed the server:
+inspect the current state instead of retrying automatically.
+
+Parser regression tests use synthetic semantic HTML and local HTTP fixtures;
+they do not claim coverage of every institution's markup. Unrecognized submitted
+file markup stops automatic report confirmation instead of claiming success.
+
 ### Examples
 
 ```console
@@ -138,6 +179,8 @@ Mutating commands ask for confirmation unless `--yes` is supplied.
 
 - Requests are restricted to the configured manaba origin.
 - Cookies are stored locally; passwords are not.
+- Each HTTP request (including redirects and body reading) has a 30-second
+  timeout, with no automatic retry. A timed-out write may already have applied.
 - HTML changes or institution-specific pages may require parser updates.
 - JavaScript-only actions need a corresponding HTML form to be automated.
 

@@ -67,6 +67,9 @@ Use these direct mappings:
 - quizzes or drills: `quizzes COURSE_ID --json`
 - surveys: `surveys COURSE_ID --json`
 - reports: `reports COURSE_ID --json`
+- assignment details and submission evidence: `quiz show COURSE_ID ITEM_ID --json`,
+  `drill show`, `survey show`, or `report show`
+- saved post-start questions without re-entry: `assignment --from-state FILE --json`
 - projects: `projects COURSE_ID --json`
 - topics: `topics COURSE_ID --json`
 - course content: `contents COURSE_ID --json`
@@ -85,6 +88,11 @@ when multiple plausible matches remain; never guess an ambiguous target.
 
 Preserve exact course names, assignment names, statuses, and deadlines in the
 answer. Clearly distinguish values returned by manaba from any inference.
+The detail commands return nullable facts and `warnings`; missing data is not a
+negative answer. `questions` covers only the current response. Unknown markup,
+missing prompts, or missing submission timestamps require inspecting the
+available evidence, not inventing values. `resubmission` requires explicit page
+evidence; a withdrawal button alone does not establish permission to resubmit.
 
 ### Interpret `tasks` carefully
 
@@ -183,7 +191,16 @@ form instead:
    ```
 
 5. Verify `提出済み`, the expected total count, and every submitted filename
-   with `get PATH`; check `submissions` when useful.
+   with `report show COURSE_ID REPORT_ID --json`; check `get PATH` or
+   `submissions` when a field is unrecognized.
+
+The dedicated single-file `report submit --json` checks the uploaded basename on
+the preview, then independently re-fetches and checks submitted state, the exact
+file-name set, and observable count/time evidence. Its successful receipt is
+`fresh_status_and_files_match`, not a file-content checksum or a unique server
+receipt. Missing count/time facts remain warnings. It rejects indistinguishable
+same-name previous submissions. An error after upload or commit may mean the
+server changed; inspect `report show` and never automatically repeat the write.
 
 If a partial report was already confirmed and the page allows resubmission,
 `report cancel --yes COURSE_ID REPORT_ID` returns it to the editable state and
@@ -220,6 +237,12 @@ To inspect without guessing field names:
 submit --yes --forms-json --button START_BUTTON PATH
 flow --yes --forms-json PATH PLAN.json
 ```
+
+When `submit --save-state FILE` was used, prefer
+`assignment --from-state FILE --json` to inspect grouped questions, available
+prompts/options and metadata. This is a local read, does not consume the file,
+and cannot restart the attempt. A fresh `quiz show` is a server GET and does not
+substitute for the saved post-start response.
 
 - `--forms-json` prints response forms as JSON instead of main text.
 - Unchecked radios expose wire values under each control's `options` array

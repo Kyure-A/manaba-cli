@@ -402,6 +402,10 @@ let test_report_state () =
 let test_report_round_trip () =
   let open Lwt.Infix in
   let submitted = ref false in
+  let uploaded_name = ref "" in
+  let render html =
+    Str.global_replace (Str.regexp "UPLOADED_FILENAME") !uploaded_name html
+  in
   let flow_completed = ref false in
   let initial_page =
     {|
@@ -418,6 +422,7 @@ let test_report_round_trip () =
   let preview_page =
     {|
     <div class="contentbody-l">提出確認</div>
+    <table><tr><th>提出ファイル</th><td><a href="file_1">UPLOADED_FILENAME</a></td></tr><tr><th>提出ファイル数</th><td>1</td></tr></table>
     <form action="course_1_report_2" method="post" enctype="multipart/form-data">
       <input type="image" name="action_ReportStudent_datadelete_rptdata1">
       <input type="submit" name="action_ReportStudent_submitdone" value="アップロード">
@@ -431,6 +436,7 @@ let test_report_round_trip () =
   let submitted_page =
     {|
     <div class="contentbody-l">状態 提出済み</div>
+    <table><tr><th>提出ファイル</th><td><a href="file_1">UPLOADED_FILENAME</a></td></tr><tr><th>提出ファイル数</th><td>1</td></tr><tr><th>提出日時</th><td>2026-09-20 02:00</td></tr></table>
     <form action="course_1_report_2" method="post" enctype="multipart/form-data">
       <input type="submit" name="action_ReportStudent_uncommitdone" value="提出取消(再提出する)">
       <input type="hidden" name="manaba-form" value="1">
@@ -536,7 +542,7 @@ let test_report_round_trip () =
             ~body:{|<a href="logout">ログアウト</a>|} ()
       | `GET, "/ct/course_1_report_2" ->
           Cohttp_lwt_unix.Server.respond_string ~status:`OK
-            ~body:(if !submitted then submitted_page else initial_page)
+            ~body:(render (if !submitted then submitted_page else initial_page))
             ()
       | `POST, "/ct/course_1_report_2"
         when Util.contains ~needle:"action_ReportStudent_submitdone"
@@ -544,8 +550,8 @@ let test_report_round_trip () =
           Alcotest.(check bool)
             "file bytes" true
             (Util.contains ~needle:"smoke-test" request_body);
-          Cohttp_lwt_unix.Server.respond_string ~status:`OK ~body:preview_page
-            ()
+          Cohttp_lwt_unix.Server.respond_string ~status:`OK
+            ~body:(render preview_page) ()
       | `POST, "/ct/course_1_report_2"
         when Util.contains ~needle:"action_ReportStudent_commitdone"
                request_body ->
@@ -553,8 +559,8 @@ let test_report_round_trip () =
             "delete button omitted on commit" false
             (Util.contains ~needle:"datadelete" request_body);
           submitted := true;
-          Cohttp_lwt_unix.Server.respond_string ~status:`OK ~body:submitted_page
-            ()
+          Cohttp_lwt_unix.Server.respond_string ~status:`OK
+            ~body:(render submitted_page) ()
       | `POST, "/ct/course_1_report_2"
         when Util.contains ~needle:"action_ReportStudent_uncommitdone"
                request_body ->
@@ -595,6 +601,7 @@ let test_report_round_trip () =
     let session = Filename.temp_file "manaba-session" ".json" in
     Sys.remove session;
     let upload = Filename.temp_file "manaba-upload" ".txt" in
+    uploaded_name := Filename.basename upload;
     let channel = open_out_bin upload in
     output_string channel "smoke-test";
     close_out channel;

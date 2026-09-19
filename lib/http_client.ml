@@ -11,6 +11,7 @@ type t = {
   jar : Cookie_jar.t;
   user_agent : string;
   context : Cohttp_lwt_unix.Client.ctx;
+  timeout_seconds : float;
 }
 
 let resolver () =
@@ -18,11 +19,14 @@ let resolver () =
     ~rewrites:[ ("", Resolver_lwt_unix.system_resolver) ]
     ()
 
-let create ~session_path =
+let create ?(timeout_seconds = 30.) ~session_path () =
+  if (not (Float.is_finite timeout_seconds)) || timeout_seconds <= 0. then
+    invalid_arg "HTTP timeout must be a positive finite number";
   {
     jar = Cookie_jar.load session_path;
     user_agent = "manaba-cli/0.1 (+https://github.com/Kyure-A/manaba-cli)";
     context = Cohttp_lwt_unix.Client.custom_ctx ~resolver:(resolver ()) ();
+    timeout_seconds;
   }
 
 let save_session client = Cookie_jar.save client.jar
@@ -44,8 +48,8 @@ let redirected_method status method_ body =
   | (301 | 302 | 303), (`POST | `PUT | `PATCH | `DELETE) -> (`GET, None)
   | _ -> (method_, body)
 
-let rec request ?(headers = Cohttp.Header.init ()) ?body ?(redirects = 12)
-    client method_ uri =
+let rec request_follow ?(headers = Cohttp.Header.init ()) ?body
+    ?(redirects = 12) client method_ uri =
   let request_body = body in
   let headers = add_default_headers client uri headers in
   let body = Option.map Cohttp_lwt.Body.of_string body in
@@ -65,10 +69,24 @@ let rec request ?(headers = Cohttp.Header.init ()) ?body ?(redirects = 12)
       let next_method, next_body =
         redirected_method status method_ request_body
       in
-      request ~headers:(Cohttp.Header.init ()) ?body:next_body
+      request_follow ~headers:(Cohttp.Header.init ()) ?body:next_body
         ~redirects:(remaining - 1) client next_method destination
   | _ ->
       Lwt.return { uri; status; headers = response_headers; body = body_string }
+
+let request ?headers ?body client method_ uri =
+  Lwt.catch
+    (fun () ->
+      Lwt_unix.with_timeout client.timeout_seconds (fun () ->
+          request_follow ?headers ?body client method_ uri))
+    (function
+      | Lwt_unix.Timeout ->
+          Lwt.fail_with
+            (Printf.sprintf
+               "HTTP request timed out after %g seconds. A write may already \
+                have been applied; do not retry it automatically."
+               client.timeout_seconds)
+      | exception_ -> Lwt.fail exception_)
 
 let get client uri = request client `GET uri
 

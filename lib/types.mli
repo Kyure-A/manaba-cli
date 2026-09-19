@@ -68,3 +68,4 @@ val course_to_yojson : course -> Yojson.Safe.t
 val task_to_yojson : task -> Yojson.Safe.t
 val link_to_yojson : link -> Yojson.Safe.t
 val public_form_to_yojson : form -> Yojson.Safe.t
+val public_form_control_to_yojson : form_control -> Yojson.Safe.t

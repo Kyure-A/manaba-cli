@@ -8,7 +8,10 @@ type response = {
 type t
 type upload = { field : string; path : string }
 
-val create : session_path:string -> t
+val create : ?timeout_seconds:float -> session_path:string -> unit -> t
+
+(* Bounds each logical request, including redirects and response-body reads.
+    Defaults to 30 seconds. Requests are never automatically retried. *)
 val save_session : t -> unit
 val clear_session : t -> unit
 val get : t -> Uri.t -> response Lwt.t

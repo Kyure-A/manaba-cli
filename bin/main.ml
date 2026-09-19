@@ -267,6 +267,81 @@ let forms_cmd =
     (command_info "forms" "ページ上のフォームと入力名を表示します。")
     Term.(ret (const forms $ target $ client $ json))
 
+let print_assignment json assignment =
+  if json then
+    print_endline
+      (Yojson.Safe.pretty_to_string (Assignment.to_yojson assignment))
+  else (
+    Printf.printf "%s\n" assignment.Assignment.path;
+    List.iter
+      (fun (fact : Assignment.fact) ->
+        Printf.printf "%s: %s\n" fact.label fact.value)
+      assignment.facts;
+    List.iter
+      (fun warning -> Printf.printf "warning: %s\n" warning)
+      assignment.warnings)
+
+let assignment_read target from_state client json =
+  match (target, from_state) with
+  | Some _, Some _ | None, None ->
+      `Error (false, "PATH または --from-state FILE のどちらか一方を指定してください。")
+  | None, Some path -> (
+      match Form_state.load path with
+      | Error problem -> `Error (false, Form_state.error_to_string problem)
+      | Ok state -> (
+          match Manaba.resolve client (Uri.to_string state.uri) with
+          | Error problem -> error problem
+          | Ok _ ->
+              print_assignment json
+                (Assignment.parse ~path:(Uri.to_string state.uri) state.body);
+              `Ok ()))
+  | Some path, None ->
+      lwt_result (Manaba.get client path) (fun response ->
+          print_assignment json
+            (Assignment.parse
+               ~path:(Uri.to_string response.Http_client.uri)
+               response.body))
+
+let assignment_cmd =
+  let optional_target =
+    Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
+  in
+  let from_state =
+    Arg.(
+      value
+      & opt (some file) None
+      & info [ "from-state" ] ~docv:"FILE"
+          ~doc:"保存済み回答画面を読み取ります。再取得・送信・状態消費は行いません。")
+  in
+  Cmd.v
+    (command_info "assignment" "課題・設問・提出記録を構造化して読み取ります。未知の項目は null です。")
+    Term.(
+      ret (const assignment_read $ optional_target $ from_state $ client $ json))
+
+let assignment_show suffix =
+  let item_id =
+    Arg.(required & pos 1 (some int) None & info [] ~docv:"ITEM_ID")
+  in
+  let show course_id item_id client json =
+    assignment_read
+      (Some (Printf.sprintf "course_%d_%s_%d" course_id suffix item_id))
+      None client json
+  in
+  Cmd.v
+    (command_info "show" "課題の現在の画面を取得して構造化します。開始ボタンは押しません。")
+    Term.(ret (const show $ course_id $ item_id $ client $ json))
+
+let quiz_cmd =
+  Cmd.group (command_info "quiz" "小テストの詳細を読み取ります。") [ assignment_show "query" ]
+
+let drill_cmd =
+  Cmd.group (command_info "drill" "ドリルの詳細を読み取ります。") [ assignment_show "drill" ]
+
+let survey_cmd =
+  Cmd.group
+    (command_info "survey" "アンケートの詳細を読み取ります。")
+    [ assignment_show "survey" ]
+
 let download target output client =
   lwt_result (Manaba.get client target) (fun response ->
       let channel = open_out_bin output in
@@ -599,7 +674,7 @@ let registration_cmd =
 
 let report_file = Arg.(required & pos 2 (some file) None & info [] ~docv:"FILE")
 
-let report_submit course_id report_id file yes client =
+let report_submit course_id report_id file yes client json =
   if
     not
       (confirm yes
@@ -608,7 +683,14 @@ let report_submit course_id report_id file yes client =
   then `Error (false, "提出を中止しました。")
   else
     lwt_result (Manaba.report_submit client ~course_id ~report_id ~file)
-      (fun response -> print_endline (Html.main_text response.Http_client.body))
+      (fun result ->
+        if json then
+          print_endline
+            (Yojson.Safe.pretty_to_string
+               (Manaba.report_submission_to_yojson result))
+        else (
+          print_endline "再取得した提出状態と提出ファイル一覧が一致しました。";
+          print_assignment false result.Manaba.assignment))
 
 let report_submit_cmd =
   let yes = Arg.(value & flag & info [ "yes"; "y" ] ~doc:"確認なしで提出します。") in
@@ -617,7 +699,7 @@ let report_submit_cmd =
     Term.(
       ret
         (const report_submit $ course_id $ report_id $ report_file $ yes
-       $ client))
+       $ client $ json))
 
 let report_cancel course_id report_id yes client =
   if
@@ -638,7 +720,7 @@ let report_cancel_cmd =
 let report_cmd =
   Cmd.group
     (command_info "report" "レポート提出を操作します。")
-    [ report_submit_cmd; report_cancel_cmd ]
+    [ assignment_show "report"; report_submit_cmd; report_cancel_cmd ]
 
 let main_cmd =
   Cmd.group
@@ -664,6 +746,10 @@ let main_cmd =
       get_cmd;
       links_cmd;
       forms_cmd;
+      assignment_cmd;
+      quiz_cmd;
+      drill_cmd;
+      survey_cmd;
       download_cmd;
       form_submit_cmd;
       flow_cmd;

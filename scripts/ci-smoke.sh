@@ -19,4 +19,12 @@ grep -q -- '--password-stdin' <<<"$login_help"
 submit_help=$("${cli[@]}" submit --help=plain)
 grep -q -- '-y, --yes' <<<"$submit_help"
 
+assignment_help=$("${cli[@]}" assignment --help=plain)
+grep -q -- '--from-state=FILE' <<<"$assignment_help"
+for kind in quiz drill survey report; do
+  "${cli[@]}" "$kind" show --help=plain >/dev/null
+done
+report_help=$("${cli[@]}" report submit --help=plain)
+grep -q -- '--json' <<<"$report_help"
+
 "${cli[@]}" --version >/dev/null

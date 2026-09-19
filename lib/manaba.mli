@@ -87,12 +87,20 @@ val registration_search :
 val registration_key : t -> string -> Http_client.response outcome
 val report_is_submitted : string -> bool
 
+type report_submission = {
+  assignment : Assignment.t;
+  expected_files : string list;
+  timestamp_changed : bool option;
+}
+
+val report_submission_to_yojson : report_submission -> Yojson.Safe.t
+
 val report_submit :
   t ->
   course_id:int ->
   report_id:int ->
   file:string ->
-  Http_client.response outcome
+  report_submission outcome
 
 val report_cancel :
   t -> course_id:int -> report_id:int -> Http_client.response outcome

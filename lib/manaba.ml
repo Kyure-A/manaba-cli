@@ -29,7 +29,7 @@ let create base_url session_path =
     | None -> Util.default_session_path ()
   in
   {
-    http = Http_client.create ~session_path;
+    http = Http_client.create ~session_path ();
     base_uri = normalize_base base_url;
     session_path;
   }
@@ -347,20 +347,33 @@ let report_target course_id report_id =
   Printf.sprintf "course_%d_report_%d" course_id report_id
 
 let report_is_submitted html =
-  let has_uncommit =
-    Html.forms html
-    |> List.exists (Html.contains_control "action_ReportStudent_uncommitdone")
-  in
-  let visible = Html.main_text html in
-  has_uncommit
-  || Util.contains ~needle:"提出済み" visible
-  || Util.contains ~needle:"提出しました" visible
+  Assignment.parse ~path:"course_0_report_0" html |> Assignment.is_submitted
+
+type report_submission = {
+  assignment : Assignment.t;
+  expected_files : string list;
+  timestamp_changed : bool option;
+}
+
+let report_submission_to_yojson result =
+  `Assoc
+    [
+      ("verification", `String "fresh_status_and_files_match");
+      ( "expected_files",
+        `List (List.map (fun value -> `String value) result.expected_files) );
+      ( "timestamp_changed",
+        match result.timestamp_changed with
+        | None -> `Null
+        | Some value -> `Bool value );
+      ("assignment", Assignment.to_yojson result.assignment);
+    ]
 
 let report_submit client ~course_id ~report_id ~file =
   let target = report_target course_id report_id in
   get client target >>= function
   | Error error -> Lwt.return (Error error)
   | Ok source_response -> (
+      let before = Assignment.parse ~path:target source_response.body in
       let forms = Html.forms source_response.body in
       let with_file =
         List.find_opt (fun form -> Html.file_controls form <> []) forms
@@ -373,10 +386,21 @@ let report_submit client ~course_id ~report_id ~file =
           | { Types.name = Some field; _ } :: _ -> (
               let upload = Http_client.{ field; path = file } in
               submit_form client ~source_response ~form ~fields:[]
-                ~uploads:[ upload ] ()
+                ~uploads:[ upload ]
+                ?button_name:
+                  (if
+                     Html.contains_control "action_ReportStudent_submitdone"
+                       form
+                   then Some "action_ReportStudent_submitdone"
+                   else None)
+                ()
               >>= function
               | Error error -> Lwt.return (Error error)
               | Ok preview_response -> (
+                  let preview =
+                    Assignment.parse ~path:target preview_response.body
+                  in
+                  let filename = Filename.basename file in
                   let preview_forms = Html.forms preview_response.body in
                   let commit_name = "action_ReportStudent_commitdone" in
                   let commit_form =
@@ -386,6 +410,24 @@ let report_submit client ~course_id ~report_id ~file =
                       preview_forms
                   in
                   match commit_form with
+                  | Some _
+                    when Option.fold ~none:false
+                           ~some:(fun count ->
+                             count <> List.length preview.submitted_files)
+                           preview.file_count ->
+                      Lwt.return
+                        (Error
+                           (Form_error
+                              "確認画面のファイル数と一覧が一致しないため最終確定していません。自動再送信しないでください。"))
+                  | Some _
+                    when not
+                           (List.exists
+                              (fun (item : Types.link) -> item.text = filename)
+                              preview.submitted_files) ->
+                      Lwt.return
+                        (Error
+                           (Form_error
+                              "アップロード後の確認画面に今回のファイル名が見つかりません。ファイルは送信済みの可能性がありますが、最終確定していません。自動再送信しないでください。"))
                   | Some commit_form -> (
                       submit_form client ~source_response:preview_response
                         ~form:commit_form ~fields:[] ~uploads:[]
@@ -395,13 +437,37 @@ let report_submit client ~course_id ~report_id ~file =
                       | Ok _ -> (
                           get client target >|= function
                           | Ok verification
-                            when report_is_submitted verification.body ->
-                              Ok verification
-                          | Ok _ ->
+                            when Filename.basename (Uri.path verification.uri)
+                                 <> target ->
                               Error
                                 (Form_error
-                                   "最終送信後も提出済み状態を確認できませんでした。manaba \
-                                    の画面を確認してください。")
+                                   "最終送信後の再取得が別の課題ページへ移動したため検証できません。自動再送信しないでください。")
+                          | Ok verification -> (
+                              let fresh =
+                                Assignment.parse ~path:target verification.body
+                              in
+                              match
+                                Assignment.verify_report ~before ~preview ~fresh
+                                  ~filename
+                              with
+                              | Error message -> Error (Form_error message)
+                              | Ok () ->
+                                  Ok
+                                    {
+                                      assignment = fresh;
+                                      expected_files =
+                                        List.map
+                                          (fun (item : Types.link) -> item.text)
+                                          preview.submitted_files;
+                                      timestamp_changed =
+                                        (match
+                                           ( before.submitted_at,
+                                             fresh.submitted_at )
+                                         with
+                                        | Some previous, Some current ->
+                                            Some (previous <> current)
+                                        | _ -> None);
+                                    })
                           | Error error -> Error error))
                   | None ->
                       Lwt.return
