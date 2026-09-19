@@ -42,6 +42,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Keep opam repository imports stable
+        # opam walks Git's checkout while importing the repository. Background
+        # maintenance can remove maintenance.lock during that walk (lstat ENOENT).
+        run: |
+          git config --global maintenance.auto false
+          git config --global gc.auto 0
       - name: Set up OCaml
         uses: ocaml/setup-ocaml@15d660006c1d3110d77c34b7faa3bddefe8b82f0 # v3.7.0
         with:
@@ -77,6 +83,11 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Keep opam repository imports stable
+        # These settings apply only to this ephemeral CI runner.
+        run: |
+          git config --global maintenance.auto false
+          git config --global gc.auto 0
       - name: Set up OCaml
         uses: ocaml/setup-ocaml@15d660006c1d3110d77c34b7faa3bddefe8b82f0 # v3.7.0
         with:
