@@ -335,6 +335,130 @@ let test_cookie_jar () =
     (Cookie_jar.header jar
        (Uri.of_string "https://manaba.tsukuba.ac.jp/local/login"))
 
+let test_cookie_request_persistence () =
+  let path = Filename.temp_file "manaba-cookie-persistence" ".json" in
+  Fun.protect
+    ~finally:(fun () -> Sys.remove path)
+    (fun () ->
+      let origin =
+        Uri.of_string "https://manaba.example.test/Shibboleth.sso/SAML2/POST"
+      in
+      let legacy_cookie name value =
+        `Assoc
+          [
+            ("name", `String name);
+            ("value", `String value);
+            ("domain", `String "manaba.example.test");
+            ("path", `String "/");
+            ("secure", `Bool true);
+            ("host_only", `Bool true);
+          ]
+      in
+      let legacy =
+        `List
+          (legacy_cookie "_shibsession_example" "active"
+          :: List.init 200 (fun index ->
+              legacy_cookie
+                (Printf.sprintf "_opensaml_req_ss%%3Amem%%3A%d" index)
+                (String.make 200 'x')))
+        |> Yojson.Safe.to_string
+      in
+      Util.write_private_file path legacy;
+      let jar = Cookie_jar.load path in
+      Alcotest.(check (option string))
+        "legacy request cookies cannot overflow header"
+        (Some "_shibsession_example=active")
+        (Cookie_jar.header jar origin);
+      Alcotest.(check string)
+        "loading does not rewrite existing session" legacy (Util.read_file path);
+      Cookie_jar.absorb_headers jar ~origin
+        (Cohttp.Header.init_with "set-cookie"
+           "_opensaml_req_ss%3Amem%3Acurrent=correlation; Path=/; Secure");
+      let expected =
+        Some
+          "_opensaml_req_ss%3Amem%3Acurrent=correlation; \
+           _shibsession_example=active"
+      in
+      Alcotest.(check (option string))
+        "current login correlation is sent" expected
+        (Cookie_jar.header jar origin);
+      Cookie_jar.save jar;
+      Alcotest.(check (option string))
+        "saving retains in-flight correlation" expected
+        (Cookie_jar.header jar origin);
+      Alcotest.(check (option string))
+        "only active session survives reload"
+        (Some "_shibsession_example=active")
+        (Cookie_jar.header (Cookie_jar.load path) origin);
+      let json = Yojson.Safe.from_string (Util.read_file path) in
+      Alcotest.(check int)
+        "request cookies not serialized" 1
+        (Yojson.Safe.Util.to_list json |> List.length))
+
+let test_cookie_expiration () =
+  let path = Filename.temp_file "manaba-cookie-expiration" ".json" in
+  Sys.remove path;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      let origin = Uri.of_string "https://manaba.example.test/" in
+      let absorb jar attributes =
+        Cookie_jar.absorb_headers jar ~origin
+          (Cohttp.Header.init_with "set-cookie"
+             ("session=value; Path=/; " ^ attributes))
+      in
+      let check_attributes expected attributes =
+        let jar = Cookie_jar.load path in
+        absorb jar "";
+        absorb jar attributes;
+        Alcotest.(check (option string))
+          attributes expected
+          (Cookie_jar.header jar origin)
+      in
+      List.iter (check_attributes None)
+        [
+          "Max-Age=0";
+          "Max-Age=-1";
+          "Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+          "Expires=Thursday, 01-Jan-70 00:00:00 GMT";
+          "Expires=Thu Jan 1 00:00:00 1970";
+          "Expires=Wed, 29 Feb 2024 00:00:00 GMT";
+          "Max-Age=0; Expires=Fri, 01 Jan 2100 00:00:00 GMT";
+          "Expires=Fri, 01 Jan 2100 00:00:00 GMT; Max-Age=-1";
+          "Max-Age=0x100; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+        ];
+      List.iter
+        (check_attributes (Some "session=value"))
+        [
+          "Max-Age=3600; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+          "Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=3600";
+          "Expires=Wed, 31 Feb 2024 00:00:00 GMT";
+          "Expires=Wed, 29 Feb 2023 00:00:00 GMT";
+          "Expires=Thu, 01 Jan 1970 24:00:00 GMT";
+          "Expires=not-a-date; Max-Age=invalid";
+        ];
+      let jar = Cookie_jar.load path in
+      absorb jar "Expires=Fri, 01 Jan 2100 00:00:00 GMT";
+      Cookie_jar.save jar;
+      let json = Yojson.Safe.from_string (Util.read_file path) in
+      let cookie = Yojson.Safe.Util.to_list json |> List.hd in
+      Alcotest.(check (float 0.))
+        "expiry is UTC, independent of local timezone" 4102444800.
+        (Yojson.Safe.Util.member "expires_at" cookie
+        |> Yojson.Safe.Util.to_number);
+      Alcotest.(check (option string))
+        "future expiry persists" (Some "session=value")
+        (Cookie_jar.header (Cookie_jar.load path) origin);
+      let fields = Yojson.Safe.Util.to_assoc cookie in
+      let expired =
+        `Assoc
+          (("expires_at", `Float 1.) :: List.remove_assoc "expires_at" fields)
+      in
+      Util.write_private_file path (Yojson.Safe.to_string (`List [ expired ]));
+      Alcotest.(check (option string))
+        "persisted expired cookie is not sent" None
+        (Cookie_jar.header (Cookie_jar.load path) origin))
+
 let test_target_origin () =
   let session = Filename.temp_file "manaba-origin" ".json" in
   Sys.remove session;
@@ -945,6 +1069,10 @@ let () =
       ( "cookies",
         [
           Alcotest.test_case "scope" `Quick test_cookie_jar;
+          Alcotest.test_case "request correlation persistence" `Quick
+            test_cookie_request_persistence;
+          Alcotest.test_case "expiration and deletion" `Quick
+            test_cookie_expiration;
           Alcotest.test_case "target origin" `Quick test_target_origin;
         ] );
       ( "auth",
