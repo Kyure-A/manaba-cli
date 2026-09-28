@@ -383,6 +383,104 @@ let test_auth_fields () =
   | forms ->
       Alcotest.failf "expected one login form, got %d" (List.length forms)
 
+let test_auth_diagnostics () =
+  let open Lwt.Infix in
+  let run =
+    let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Lwt_unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0))
+    >>= fun () ->
+    Lwt_unix.listen socket 10;
+    let port =
+      match Lwt_unix.getsockname socket with
+      | Unix.ADDR_INET (_, port) -> port
+      | _ -> Alcotest.fail "expected TCP socket"
+    in
+    let stop, stop_wakener = Lwt.wait () in
+    let current_page = ref "" in
+    let send_credentials = ref false in
+    let callback _connection request body =
+      Cohttp_lwt.Body.drain_body body >>= fun () ->
+      if !send_credentials && Cohttp.Request.meth request = `GET then
+        Cohttp_lwt_unix.Server.respond_string ~status:`OK
+          ~body:
+            {|<form method="post" action="/idp/login?query-secret#fragment-secret">
+                <input name="j_username"><input type="password" name="j_password">
+              </form>|}
+          ()
+      else
+        Cohttp_lwt_unix.Server.respond_string ~status:`Forbidden
+          ~headers:
+            (Cohttp.Header.init_with "set-cookie" "cookie-secret=value-secret")
+          ~body:!current_page ()
+    in
+    let server =
+      Cohttp_lwt_unix.Server.create ~stop
+        ~mode:(`TCP (`Socket socket))
+        (Cohttp_lwt_unix.Server.make ~callback ())
+    in
+    Lwt.async (fun () -> server);
+    Lwt.pause () >>= fun () ->
+    Lwt.finalize
+      (fun () ->
+        Lwt_list.iter_s
+          (fun (title, page, credentials_sent) ->
+            send_credentials := credentials_sent;
+            let forms =
+              if credentials_sent then
+                {|<form><input name="field-name-secret" value="field-value-secret"></form>
+                  <form action="/action-secret"></form>
+                  <a href="/logout?logout-secret">link-text-secret</a>
+                  <meta http-equiv="Refresh" content="0;url=/refresh-secret">
+                  <script>window.location.href = '/script-secret';</script>|}
+              else ""
+            in
+            current_page :=
+              "<html><title>" ^ title
+              ^ " title-secret</title><body>認証 username-secret password-secret "
+              ^ "text-secret " ^ forms ^ "</body></html>";
+            let session =
+              Filename.temp_file "manaba-auth-diagnostics" ".json"
+            in
+            Sys.remove session;
+            let base_uri =
+              Uri.of_string (Printf.sprintf "http://127.0.0.1:%d/ct/" port)
+            in
+            let client = Http_client.create ~session_path:session () in
+            Auth.login client ~base_uri ~username:"username-secret"
+              ~password:"password-secret"
+            >|= function
+            | Error (Auth.Unsupported_flow message) ->
+                (* Exact output excludes all supplied page, URL, form, cookie,
+                   username and password strings, including field names. *)
+                Alcotest.(check string)
+                  "only allowlisted diagnostics"
+                  (Printf.sprintf
+                     "自動処理できない認証画面が表示されました。 (http_status=403 step=%d \
+                      credentials_sent=%b forms=%d password_form=false \
+                      saml_form=false origin=manaba page=%s logout_link=%b \
+                      logout_marker=false meta_refresh=%b script_redirect=%b)"
+                     (if credentials_sent then 2 else 1)
+                     credentials_sent
+                     (if credentials_sent then 2 else 0)
+                     page credentials_sent credentials_sent credentials_sent)
+                  message;
+                Alcotest.(check bool)
+                  "failed login does not save a session" false
+                  (Sys.file_exists session)
+            | Error _ -> Alcotest.fail "unsupported page misclassified"
+            | Ok _ -> Alcotest.fail "unsupported page accepted")
+          [
+            ("Unknown", "unknown", true);
+            ("Stale Request", "stale_request", false);
+            ("Saving Session Information", "saving_session", false);
+            ("Loading Session Information", "loading_session", false);
+          ])
+      (fun () ->
+        Lwt.wakeup_later stop_wakener ();
+        server)
+  in
+  Lwt_main.run run
+
 let test_report_state () =
   let submitted =
     {|
@@ -840,7 +938,11 @@ let () =
           Alcotest.test_case "target origin" `Quick test_target_origin;
         ] );
       ( "auth",
-        [ Alcotest.test_case "credential fields" `Quick test_auth_fields ] );
+        [
+          Alcotest.test_case "credential fields" `Quick test_auth_fields;
+          Alcotest.test_case "safe unsupported-page diagnostics" `Quick
+            test_auth_diagnostics;
+        ] );
       ( "report",
         [
           Alcotest.test_case "submission state" `Quick test_report_state;
