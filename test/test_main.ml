@@ -420,6 +420,10 @@ let test_cookie_expiration () =
           "Max-Age=0";
           "Max-Age=-1";
           "Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+          "Expires=Thu, 01 January 1970 00:00:00 GMT";
+          "Expires=Thu, 01 Jan1 1970 00:00:00 GMT";
+          "Expires=Thu, 01 Jan 1970 00:00:00GMT";
+          "Expires=Thu, 01st Jan 1970year 00:00:00 GMT";
           "Expires=Thursday, 01-Jan-70 00:00:00 GMT";
           "Expires=Thu Jan 1 00:00:00 1970";
           "Expires=Wed, 29 Feb 2024 00:00:00 GMT";
@@ -435,6 +439,9 @@ let test_cookie_expiration () =
           "Expires=Wed, 31 Feb 2024 00:00:00 GMT";
           "Expires=Wed, 29 Feb 2023 00:00:00 GMT";
           "Expires=Thu, 01 Jan 1970 24:00:00 GMT";
+          "Expires=Thu, 001 Jan 1970 00:00:00 GMT";
+          "Expires=Thu, 01 Jan 19700 00:00:00 GMT";
+          "Expires=Thu, 01 Jan 1970 00:00:000GMT";
           "Expires=not-a-date; Max-Age=invalid";
         ];
       let jar = Cookie_jar.load path in

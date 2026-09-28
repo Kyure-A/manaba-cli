@@ -134,10 +134,37 @@ let cookie_date value =
   and month = ref None
   and year = ref None
   and time = ref None in
-  let digits token min_length max_length =
-    let length = String.length token in
-    length >= min_length && length <= max_length
-    && String.for_all (fun char -> char >= '0' && char <= '9') token
+  let is_digit char = char >= '0' && char <= '9' in
+  let decimal_prefix token start min_length max_length =
+    let rec finish index =
+      if index < String.length token && is_digit token.[index] then
+        finish (index + 1)
+      else index
+    in
+    let next = finish start in
+    let length = next - start in
+    if length < min_length || length > max_length then None
+    else Some (int_of_string (String.sub token start length), next)
+  in
+  let clock token =
+    let colon index = index < String.length token && token.[index] = ':' in
+    match decimal_prefix token 0 1 2 with
+    | Some (hour, next) when colon next -> (
+        match decimal_prefix token (next + 1) 1 2 with
+        | Some (minute, next) when colon next ->
+            Option.map
+              (fun (second, _) -> (hour, minute, second))
+              (decimal_prefix token (next + 1) 1 2)
+        | _ -> None)
+    | _ -> None
+  in
+  let delimiter char =
+    let code = Char.code char in
+    code = 9
+    || (code >= 0x20 && code <= 0x2f)
+    || (code >= 0x3b && code <= 0x40)
+    || (code >= 0x5b && code <= 0x60)
+    || (code >= 0x7b && code <= 0x7e)
   in
   let months =
     [
@@ -155,24 +182,30 @@ let cookie_date value =
       "dec";
     ]
   in
-  Str.split (Str.regexp "[^A-Za-z0-9:]+") value
+  (* RFC 6265 date tokens accept a non-digit suffix after clock/day/year
+     prefixes, and any suffix after a three-letter month. *)
+  String.map (fun char -> if delimiter char then ' ' else char) value
+  |> String.split_on_char ' '
+  |> List.filter (( <> ) "")
   |> List.iter (fun token ->
-      match String.split_on_char ':' token with
-      | [ hour; minute; second ]
-        when !time = None
-             && List.for_all
-                  (fun part -> digits part 1 2)
-                  [ hour; minute; second ] ->
-          time :=
-            Some (int_of_string hour, int_of_string minute, int_of_string second)
-      | _ when !day = None && digits token 1 2 -> day := int_of_string_opt token
-      | _ when !month = None && List.mem (Util.lowercase token) months ->
-          month :=
-            List.mapi (fun index value -> (index, value)) months
-            |> List.find_opt (fun (_, value) -> value = Util.lowercase token)
-            |> Option.map fst
-      | _ when !year = None && digits token 2 4 ->
-          year := int_of_string_opt token
+      let month_prefix =
+        if String.length token < 3 then None
+        else
+          let prefix = Util.lowercase (String.sub token 0 3) in
+          List.mapi (fun index value -> (index, value)) months
+          |> List.find_opt (fun (_, value) -> value = prefix)
+          |> Option.map fst
+      in
+      match
+        ( clock token,
+          decimal_prefix token 0 1 2,
+          month_prefix,
+          decimal_prefix token 0 2 4 )
+      with
+      | Some clock, _, _, _ when !time = None -> time := Some clock
+      | _, Some (value, _), _, _ when !day = None -> day := Some value
+      | _, _, Some value, _ when !month = None -> month := Some value
+      | _, _, _, Some (value, _) when !year = None -> year := Some value
       | _ -> ());
   match (!day, !month, !year, !time) with
   | Some day, Some month, Some year, Some (hour, minute, second) ->
