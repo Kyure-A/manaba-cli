@@ -335,6 +335,137 @@ let test_cookie_jar () =
     (Cookie_jar.header jar
        (Uri.of_string "https://manaba.tsukuba.ac.jp/local/login"))
 
+let test_cookie_request_persistence () =
+  let path = Filename.temp_file "manaba-cookie-persistence" ".json" in
+  Fun.protect
+    ~finally:(fun () -> Sys.remove path)
+    (fun () ->
+      let origin =
+        Uri.of_string "https://manaba.example.test/Shibboleth.sso/SAML2/POST"
+      in
+      let legacy_cookie name value =
+        `Assoc
+          [
+            ("name", `String name);
+            ("value", `String value);
+            ("domain", `String "manaba.example.test");
+            ("path", `String "/");
+            ("secure", `Bool true);
+            ("host_only", `Bool true);
+          ]
+      in
+      let legacy =
+        `List
+          (legacy_cookie "_shibsession_example" "active"
+          :: List.init 200 (fun index ->
+              legacy_cookie
+                (Printf.sprintf "_opensaml_req_ss%%3Amem%%3A%d" index)
+                (String.make 200 'x')))
+        |> Yojson.Safe.to_string
+      in
+      Util.write_private_file path legacy;
+      let jar = Cookie_jar.load path in
+      Alcotest.(check (option string))
+        "legacy request cookies cannot overflow header"
+        (Some "_shibsession_example=active")
+        (Cookie_jar.header jar origin);
+      Alcotest.(check string)
+        "loading does not rewrite existing session" legacy (Util.read_file path);
+      Cookie_jar.absorb_headers jar ~origin
+        (Cohttp.Header.init_with "set-cookie"
+           "_opensaml_req_ss%3Amem%3Acurrent=correlation; Path=/; Secure");
+      let expected =
+        Some
+          "_opensaml_req_ss%3Amem%3Acurrent=correlation; \
+           _shibsession_example=active"
+      in
+      Alcotest.(check (option string))
+        "current login correlation is sent" expected
+        (Cookie_jar.header jar origin);
+      Cookie_jar.save jar;
+      Alcotest.(check (option string))
+        "saving retains in-flight correlation" expected
+        (Cookie_jar.header jar origin);
+      Alcotest.(check (option string))
+        "only active session survives reload"
+        (Some "_shibsession_example=active")
+        (Cookie_jar.header (Cookie_jar.load path) origin);
+      let json = Yojson.Safe.from_string (Util.read_file path) in
+      Alcotest.(check int)
+        "request cookies not serialized" 1
+        (Yojson.Safe.Util.to_list json |> List.length))
+
+let test_cookie_expiration () =
+  let path = Filename.temp_file "manaba-cookie-expiration" ".json" in
+  Sys.remove path;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      let origin = Uri.of_string "https://manaba.example.test/" in
+      let absorb jar attributes =
+        Cookie_jar.absorb_headers jar ~origin
+          (Cohttp.Header.init_with "set-cookie"
+             ("session=value; Path=/; " ^ attributes))
+      in
+      let check_attributes expected attributes =
+        let jar = Cookie_jar.load path in
+        absorb jar "";
+        absorb jar attributes;
+        Alcotest.(check (option string))
+          attributes expected
+          (Cookie_jar.header jar origin)
+      in
+      List.iter (check_attributes None)
+        [
+          "Max-Age=0";
+          "Max-Age=-1";
+          "Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+          "Expires=Thu, 01 January 1970 00:00:00 GMT";
+          "Expires=Thu, 01 Jan1 1970 00:00:00 GMT";
+          "Expires=Thu, 01 Jan 1970 00:00:00GMT";
+          "Expires=Thu, 01st Jan 1970year 00:00:00 GMT";
+          "Expires=Thursday, 01-Jan-70 00:00:00 GMT";
+          "Expires=Thu Jan 1 00:00:00 1970";
+          "Expires=Wed, 29 Feb 2024 00:00:00 GMT";
+          "Max-Age=0; Expires=Fri, 01 Jan 2100 00:00:00 GMT";
+          "Expires=Fri, 01 Jan 2100 00:00:00 GMT; Max-Age=-1";
+          "Max-Age=0x100; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+        ];
+      List.iter
+        (check_attributes (Some "session=value"))
+        [
+          "Max-Age=3600; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+          "Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=3600";
+          "Expires=Wed, 31 Feb 2024 00:00:00 GMT";
+          "Expires=Wed, 29 Feb 2023 00:00:00 GMT";
+          "Expires=Thu, 01 Jan 1970 24:00:00 GMT";
+          "Expires=Thu, 001 Jan 1970 00:00:00 GMT";
+          "Expires=Thu, 01 Jan 19700 00:00:00 GMT";
+          "Expires=Thu, 01 Jan 1970 00:00:000GMT";
+          "Expires=not-a-date; Max-Age=invalid";
+        ];
+      let jar = Cookie_jar.load path in
+      absorb jar "Expires=Fri, 01 Jan 2100 00:00:00 GMT";
+      Cookie_jar.save jar;
+      let json = Yojson.Safe.from_string (Util.read_file path) in
+      let cookie = Yojson.Safe.Util.to_list json |> List.hd in
+      Alcotest.(check (float 0.))
+        "expiry is UTC, independent of local timezone" 4102444800.
+        (Yojson.Safe.Util.member "expires_at" cookie
+        |> Yojson.Safe.Util.to_number);
+      Alcotest.(check (option string))
+        "future expiry persists" (Some "session=value")
+        (Cookie_jar.header (Cookie_jar.load path) origin);
+      let fields = Yojson.Safe.Util.to_assoc cookie in
+      let expired =
+        `Assoc
+          (("expires_at", `Float 1.) :: List.remove_assoc "expires_at" fields)
+      in
+      Util.write_private_file path (Yojson.Safe.to_string (`List [ expired ]));
+      Alcotest.(check (option string))
+        "persisted expired cookie is not sent" None
+        (Cookie_jar.header (Cookie_jar.load path) origin))
+
 let test_target_origin () =
   let session = Filename.temp_file "manaba-origin" ".json" in
   Sys.remove session;
@@ -382,6 +513,114 @@ let test_auth_fields () =
         (List.assoc_opt "_eventId_proceed" fields)
   | forms ->
       Alcotest.failf "expected one login form, got %d" (List.length forms)
+
+let test_auth_diagnostics () =
+  let open Lwt.Infix in
+  let run =
+    let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Lwt_unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0))
+    >>= fun () ->
+    Lwt_unix.listen socket 10;
+    let port =
+      match Lwt_unix.getsockname socket with
+      | Unix.ADDR_INET (_, port) -> port
+      | _ -> Alcotest.fail "expected TCP socket"
+    in
+    let stop, stop_wakener = Lwt.wait () in
+    let current_page = ref "" in
+    let send_credentials = ref false in
+    let callback _connection request body =
+      Cohttp_lwt.Body.drain_body body >>= fun () ->
+      if !send_credentials && Cohttp.Request.meth request = `GET then
+        Cohttp_lwt_unix.Server.respond_string ~status:`OK
+          ~body:
+            {|<form method="post" action="/Shibboleth.sso/SAML2/POST?query-secret#fragment-secret">
+                <input name="j_username"><input type="password" name="j_password">
+              </form>|}
+          ()
+      else
+        Cohttp_lwt_unix.Server.respond_string ~status:`Forbidden
+          ~headers:
+            (Cohttp.Header.init_with "set-cookie" "cookie-secret=value-secret")
+          ~body:!current_page ()
+    in
+    let server =
+      Cohttp_lwt_unix.Server.create ~stop
+        ~mode:(`TCP (`Socket socket))
+        (Cohttp_lwt_unix.Server.make ~callback ())
+    in
+    Lwt.async (fun () -> server);
+    Lwt.pause () >>= fun () ->
+    Lwt.finalize
+      (fun () ->
+        Lwt_list.iter_s
+          (fun (title, page, credentials_sent, server_error) ->
+            send_credentials := credentials_sent;
+            let forms =
+              if credentials_sent then
+                {|<form><input name="field-name-secret" value="field-value-secret"></form>
+                  <form action="/action-secret"></form>
+                  <a href="/logout?logout-secret">link-text-secret</a>
+                  <meta http-equiv="Refresh" content="0;url=/refresh-secret">
+                  <script>window.location.href = '/script-secret';</script>|}
+              else ""
+            in
+            current_page :=
+              "<html><title>" ^ title
+              ^ " title-secret</title><body>認証 username-secret password-secret "
+              ^ "text-secret " ^ forms ^ "</body></html>";
+            let session =
+              Filename.temp_file "manaba-auth-diagnostics" ".json"
+            in
+            Sys.remove session;
+            let base_uri =
+              Uri.of_string (Printf.sprintf "http://127.0.0.1:%d/ct/" port)
+            in
+            let client = Http_client.create ~session_path:session () in
+            Auth.login client ~base_uri ~username:"username-secret"
+              ~password:"password-secret"
+            >|= function
+            | Error (Auth.Unsupported_flow message) ->
+                (* Exact output excludes all supplied page, URL, form, cookie,
+                   username and password strings, including field names. *)
+                Alcotest.(check string)
+                  "only allowlisted diagnostics"
+                  (Printf.sprintf
+                     "自動処理できない認証画面が表示されました。 (http_status=403 step=%d \
+                      credentials_sent=%b forms=%d password_form=false \
+                      saml_form=false origin=manaba page=%s logout_link=%b \
+                      logout_marker=false meta_refresh=%b script_redirect=%b \
+                      endpoint=%s server_error=%s body_bytes=%d \
+                      shibboleth=false)"
+                     (if credentials_sent then 2 else 1)
+                     credentials_sent
+                     (if credentials_sent then 2 else 0)
+                     page credentials_sent credentials_sent credentials_sent
+                     (if credentials_sent then "saml_post" else "other")
+                     server_error
+                     (String.length !current_page))
+                  message;
+                Alcotest.(check bool)
+                  "failed login does not save a session" false
+                  (Sys.file_exists session)
+            | Error _ -> Alcotest.fail "unsupported page misclassified"
+            | Ok _ -> Alcotest.fail "unsupported page accepted")
+          [
+            ("Unknown", "unknown", true, "unknown");
+            ("Stale Request", "stale_request", false, "unknown");
+            ("Saving Session Information", "saving_session", false, "unknown");
+            ("Loading Session Information", "loading_session", false, "unknown");
+            ("Bad Request", "unknown", false, "bad_request");
+            ("Size of a request header", "unknown", false, "oversized_header");
+            ("Content-Type", "unknown", false, "content_type");
+            ("opensaml::BindingException", "unknown", false, "saml_binding");
+            ("opensaml::FatalProfileException", "unknown", false, "saml_profile");
+          ])
+      (fun () ->
+        Lwt.wakeup_later stop_wakener ();
+        server)
+  in
+  Lwt_main.run run
 
 let test_report_state () =
   let submitted =
@@ -837,10 +1076,18 @@ let () =
       ( "cookies",
         [
           Alcotest.test_case "scope" `Quick test_cookie_jar;
+          Alcotest.test_case "request correlation persistence" `Quick
+            test_cookie_request_persistence;
+          Alcotest.test_case "expiration and deletion" `Quick
+            test_cookie_expiration;
           Alcotest.test_case "target origin" `Quick test_target_origin;
         ] );
       ( "auth",
-        [ Alcotest.test_case "credential fields" `Quick test_auth_fields ] );
+        [
+          Alcotest.test_case "credential fields" `Quick test_auth_fields;
+          Alcotest.test_case "safe unsupported-page diagnostics" `Quick
+            test_auth_diagnostics;
+        ] );
       ( "report",
         [
           Alcotest.test_case "submission state" `Quick test_report_state;

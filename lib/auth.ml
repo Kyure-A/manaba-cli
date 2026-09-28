@@ -46,6 +46,99 @@ let post_form client response form fields =
   | Types.Post | Types.Other_method _ ->
       Http_client.post_form client destination fields
 
+(* Keep diagnostics to fixed labels and counts. Authentication responses may
+   contain credentials, assertions, cookies, or tokens even in their URLs. *)
+let response_context ~base_uri ~step ~credentials_sent response forms =
+  let origin uri =
+    let scheme = Option.map Util.lowercase (Uri.scheme uri) in
+    let port =
+      match (Uri.port uri, scheme) with
+      | Some port, _ -> Some port
+      | None, Some "https" -> Some 443
+      | None, Some "http" -> Some 80
+      | _ -> None
+    in
+    (scheme, Option.map Util.lowercase (Uri.host uri), port)
+  in
+  let body = Util.lowercase response.Http_client.body in
+  let contains_any needles =
+    List.exists (fun needle -> Util.contains ~needle body) needles
+  in
+  let server_error =
+    if
+      contains_any
+        [
+          "request header too large";
+          "size of a request header";
+          "too many headers";
+        ]
+    then "oversized_header"
+    else if contains_any [ "content-type" ] then "content_type"
+    else if contains_any [ "opensaml::bindingexception" ] then "saml_binding"
+    else if contains_any [ "opensaml::fatalprofileexception" ] then
+      "saml_profile"
+    else if contains_any [ "bad request" ] then "bad_request"
+    else "unknown"
+  in
+  let endpoint =
+    if
+      Util.ends_with ~suffix:"/Shibboleth.sso/SAML2/POST"
+        (Uri.path response.uri)
+    then "saml_post"
+    else "other"
+  in
+  let page =
+    if Util.contains ~needle:"stale request" body then "stale_request"
+    else if Util.contains ~needle:"saving session information" body then
+      "saving_session"
+    else if Util.contains ~needle:"loading session information" body then
+      "loading_session"
+    else "unknown"
+  in
+  let soup = Soup.parse response.body in
+  let logout_link =
+    Html.links response.body
+    |> List.exists (fun link ->
+        Util.contains ~needle:"logout" (Util.lowercase link.Types.href))
+  in
+  let meta_refresh =
+    Soup.select "meta[http-equiv]" soup
+    |> Soup.to_list
+    |> List.exists (fun node ->
+        Option.map Util.lowercase (Soup.attribute "http-equiv" node)
+        = Some "refresh")
+  in
+  let script_redirect =
+    Soup.select "script" soup |> Soup.to_list
+    |> List.exists (fun node ->
+        let script =
+          Soup.trimmed_texts node |> String.concat " " |> Util.lowercase
+        in
+        List.exists
+          (fun needle -> Util.contains ~needle script)
+          [
+            "window.location";
+            "location.href";
+            "location.replace";
+            "location.assign";
+          ])
+  in
+  Printf.sprintf
+    "http_status=%d step=%d credentials_sent=%b forms=%d password_form=%b \
+     saml_form=%b origin=%s page=%s logout_link=%b logout_marker=%b \
+     meta_refresh=%b script_redirect=%b endpoint=%s server_error=%s \
+     body_bytes=%d shibboleth=%b"
+    (Cohttp.Code.code_of_status response.status)
+    step credentials_sent (List.length forms)
+    (List.exists Html.contains_password forms)
+    (List.exists (Html.contains_control "SAMLResponse") forms)
+    (if origin response.uri = origin base_uri then "manaba" else "external")
+    page logout_link
+    (Html.is_logged_in response.body)
+    meta_refresh script_redirect endpoint server_error
+    (String.length response.body)
+    (contains_any [ "shibboleth" ])
+
 let login client ~base_uri ~username ~password =
   let start = Uri.resolve "" base_uri (Uri.of_string "./") in
   let rec continue remaining credentials_sent response =
@@ -76,15 +169,14 @@ let login client ~base_uri ~username ~password =
                   post_form client response form (Html.default_fields form)
                   >>= continue (remaining - 1) credentials_sent
               | _ ->
-                  let visible = Html.main_text response.body in
                   let detail =
-                    if
-                      Util.contains ~needle:"Authentication failed" visible
-                      || Util.contains ~needle:"認証" visible
-                    then "ID またはパスワードを確認してください。"
-                    else "自動処理できない確認画面が表示されました。ブラウザでログインできることを確認してください。"
+                    response_context ~base_uri ~step:(11 - remaining)
+                      ~credentials_sent response forms
                   in
-                  Lwt.return (Error (Login_failed detail))))
+                  Lwt.return
+                    (Error
+                       (Unsupported_flow
+                          ("自動処理できない認証画面が表示されました。 (" ^ detail ^ ")")))))
   in
   Lwt.catch
     (fun () -> Http_client.get client start >>= continue 10 false)
