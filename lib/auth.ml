@@ -61,6 +61,32 @@ let response_context ~base_uri ~step ~credentials_sent response forms =
     (scheme, Option.map Util.lowercase (Uri.host uri), port)
   in
   let body = Util.lowercase response.Http_client.body in
+  let contains_any needles =
+    List.exists (fun needle -> Util.contains ~needle body) needles
+  in
+  let server_error =
+    if
+      contains_any
+        [
+          "request header too large";
+          "size of a request header";
+          "too many headers";
+        ]
+    then "oversized_header"
+    else if contains_any [ "content-type" ] then "content_type"
+    else if contains_any [ "opensaml::bindingexception" ] then "saml_binding"
+    else if contains_any [ "opensaml::fatalprofileexception" ] then
+      "saml_profile"
+    else if contains_any [ "bad request" ] then "bad_request"
+    else "unknown"
+  in
+  let endpoint =
+    if
+      Util.ends_with ~suffix:"/Shibboleth.sso/SAML2/POST"
+        (Uri.path response.uri)
+    then "saml_post"
+    else "other"
+  in
   let page =
     if Util.contains ~needle:"stale request" body then "stale_request"
     else if Util.contains ~needle:"saving session information" body then
@@ -100,7 +126,8 @@ let response_context ~base_uri ~step ~credentials_sent response forms =
   Printf.sprintf
     "http_status=%d step=%d credentials_sent=%b forms=%d password_form=%b \
      saml_form=%b origin=%s page=%s logout_link=%b logout_marker=%b \
-     meta_refresh=%b script_redirect=%b"
+     meta_refresh=%b script_redirect=%b endpoint=%s server_error=%s \
+     body_bytes=%d shibboleth=%b"
     (Cohttp.Code.code_of_status response.status)
     step credentials_sent (List.length forms)
     (List.exists Html.contains_password forms)
@@ -108,7 +135,9 @@ let response_context ~base_uri ~step ~credentials_sent response forms =
     (if origin response.uri = origin base_uri then "manaba" else "external")
     page logout_link
     (Html.is_logged_in response.body)
-    meta_refresh script_redirect
+    meta_refresh script_redirect endpoint server_error
+    (String.length response.body)
+    (contains_any [ "shibboleth" ])
 
 let login client ~base_uri ~username ~password =
   let start = Uri.resolve "" base_uri (Uri.of_string "./") in

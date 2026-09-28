@@ -403,7 +403,7 @@ let test_auth_diagnostics () =
       if !send_credentials && Cohttp.Request.meth request = `GET then
         Cohttp_lwt_unix.Server.respond_string ~status:`OK
           ~body:
-            {|<form method="post" action="/idp/login?query-secret#fragment-secret">
+            {|<form method="post" action="/Shibboleth.sso/SAML2/POST?query-secret#fragment-secret">
                 <input name="j_username"><input type="password" name="j_password">
               </form>|}
           ()
@@ -423,7 +423,7 @@ let test_auth_diagnostics () =
     Lwt.finalize
       (fun () ->
         Lwt_list.iter_s
-          (fun (title, page, credentials_sent) ->
+          (fun (title, page, credentials_sent, server_error) ->
             send_credentials := credentials_sent;
             let forms =
               if credentials_sent then
@@ -458,11 +458,16 @@ let test_auth_diagnostics () =
                      "自動処理できない認証画面が表示されました。 (http_status=403 step=%d \
                       credentials_sent=%b forms=%d password_form=false \
                       saml_form=false origin=manaba page=%s logout_link=%b \
-                      logout_marker=false meta_refresh=%b script_redirect=%b)"
+                      logout_marker=false meta_refresh=%b script_redirect=%b \
+                      endpoint=%s server_error=%s body_bytes=%d \
+                      shibboleth=false)"
                      (if credentials_sent then 2 else 1)
                      credentials_sent
                      (if credentials_sent then 2 else 0)
-                     page credentials_sent credentials_sent credentials_sent)
+                     page credentials_sent credentials_sent credentials_sent
+                     (if credentials_sent then "saml_post" else "other")
+                     server_error
+                     (String.length !current_page))
                   message;
                 Alcotest.(check bool)
                   "failed login does not save a session" false
@@ -470,10 +475,15 @@ let test_auth_diagnostics () =
             | Error _ -> Alcotest.fail "unsupported page misclassified"
             | Ok _ -> Alcotest.fail "unsupported page accepted")
           [
-            ("Unknown", "unknown", true);
-            ("Stale Request", "stale_request", false);
-            ("Saving Session Information", "saving_session", false);
-            ("Loading Session Information", "loading_session", false);
+            ("Unknown", "unknown", true, "unknown");
+            ("Stale Request", "stale_request", false, "unknown");
+            ("Saving Session Information", "saving_session", false, "unknown");
+            ("Loading Session Information", "loading_session", false, "unknown");
+            ("Bad Request", "unknown", false, "bad_request");
+            ("Size of a request header", "unknown", false, "oversized_header");
+            ("Content-Type", "unknown", false, "content_type");
+            ("opensaml::BindingException", "unknown", false, "saml_binding");
+            ("opensaml::FatalProfileException", "unknown", false, "saml_profile");
           ])
       (fun () ->
         Lwt.wakeup_later stop_wakener ();
